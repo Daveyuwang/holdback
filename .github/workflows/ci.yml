@@ -1,0 +1,27 @@
+# Linux build, lint and the runtime's parity test. macOS is checked locally before each push.
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust/holdback
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/holdback
+          key: privacy-filter-q4
+      - run: cargo clippy --release --all-targets -- -D warnings
+      - name: Download the model and detect a sample
+        run: |
+          cargo build --release
+          echo '{"texts": ["Contact Alice Example at alice@example.com"]}' > "$RUNNER_TEMP/sample.json"
+          ./target/release/holdback spans "$RUNNER_TEMP/sample.json"
+      - run: cargo test --release

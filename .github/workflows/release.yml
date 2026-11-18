@@ -1,0 +1,85 @@
+# A tag builds the release binaries, checks them on clean machines and attaches them to a draft release.
+# Run it by hand to check the binaries without releasing.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-latest, target: aarch64-apple-darwin}
+          - {os: macos-latest, target: x86_64-apple-darwin}
+          - {os: ubuntu-22.04, target: x86_64-unknown-linux-musl}
+          - {os: ubuntu-22.04-arm, target: aarch64-unknown-linux-musl}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --target ${{ matrix.target }}
+        working-directory: rust/holdback
+      - name: Package with a checksum
+        run: |
+          tar -czf holdback-${{ matrix.target }}.tar.gz -C rust/holdback/target/${{ matrix.target }}/release holdback
+          shasum -a 256 holdback-${{ matrix.target }}.tar.gz > holdback-${{ matrix.target }}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holdback-${{ matrix.target }}
+          path: holdback-${{ matrix.target }}.tar.gz*
+
+  # A machine that has never seen holdback: install from the archive, then use it.
+  clean-machine:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-latest, target: aarch64-apple-darwin}
+          - {os: ubuntu-latest, target: x86_64-unknown-linux-musl}
+          - {os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: holdback-${{ matrix.target }}
+      - name: Install with the install script
+        run: |
+          HOLDBACK_ARCHIVE="$PWD/holdback-${{ matrix.target }}.tar.gz" sh install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/holdback
+          key: privacy-filter-q4
+          enableCrossOsArchive: true
+      - run: holdback --version && holdback doctor
+      - name: Detect a sample
+        run: |
+          echo '{"texts": ["Contact Alice Example at alice@example.com"]}' > "$RUNNER_TEMP/sample.json"
+          holdback spans "$RUNNER_TEMP/sample.json" | tee /dev/stderr | grep -q private_email
+      - name: Answer a hook event
+        run: |
+          echo '{"hook_event_name": "PostToolUse", "tool_name": "Read", "tool_response": {"file": {"content": "Contact Alice Example at alice@example.com"}}}' \
+            | holdback hook | tee /dev/stderr | grep -q 'PRIVATE_EMAIL_'
+          holdback doctor
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: clean-machine
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md." holdback-*.tar.gz*
+        env:
+          GH_TOKEN: ${{ github.token }}

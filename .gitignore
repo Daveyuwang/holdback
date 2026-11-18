@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+bench/results/
+.DS_Store
+rust/**/target/
+node_modules/

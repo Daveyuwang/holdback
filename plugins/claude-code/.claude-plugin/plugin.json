@@ -1,0 +1,5 @@
+{
+  "name": "holdback",
+  "version": "0.3.1",
+  "description": "Keeps private values and secrets on your machine: starts the local privacy proxy, or protects sessions the proxy cannot route with hook mode."
+}

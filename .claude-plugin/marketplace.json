@@ -1,0 +1,5 @@
+{
+  "name": "holdback",
+  "owner": {"name": "holdback"},
+  "plugins": [{"name": "holdback", "source": "./plugins/claude-code", "description": "Local privacy proxy for Claude Code."}]
+}
