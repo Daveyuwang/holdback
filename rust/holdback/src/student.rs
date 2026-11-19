@@ -2,7 +2,7 @@
 //! same eight categories as the Privacy Filter. Selected by HOLDBACK_STUDENT_DIR, a directory with config.json,
 //! model.safetensors (f32) and tokenizer.json. Weights are read in place from the memory-mapped file, so they count
 //! as file cache, not process memory.
-use crate::detect::Span;
+use crate::detect::{SEPARATORS, Span};
 use crate::native::sgemm;
 use anyhow::{Context, Result, anyhow, bail};
 use memmap2::Mmap;
@@ -93,9 +93,9 @@ impl Student {
     }
 }
 
-/// Token ranges of at most BODY tokens. A window ends after a line break in its last quarter if there is one, else
-/// after whitespace there, so that a value is not cut in two; a value cut at a window edge can lose half its
-/// replacement.
+/// Token ranges of at most BODY tokens. A window ends in its last quarter after a line break if there is one, else
+/// after a separator (as in one-line JSON), else after whitespace, so that a value is not cut in two; a value cut at
+/// a window edge can lose half its replacement.
 fn cuts(text: &str, offsets: &[(usize, usize)]) -> Vec<(usize, usize)> {
     let gap = |i: usize| {
         let (a, b) = (offsets[i - 1].1, offsets[i].0);
@@ -108,8 +108,13 @@ fn cuts(text: &str, offsets: &[(usize, usize)]) -> Vec<(usize, usize)> {
             out.push((at, offsets.len()));
             break;
         }
-        let near = hard - BODY / 4..=hard;
-        let end = near.clone().rev().find(|&i| gap(i).contains('\n')).or_else(|| near.rev().find(|&i| gap(i).chars().any(char::is_whitespace))).unwrap_or(hard);
+        let near = || (hard - BODY / 4..=hard).rev();
+        let after_separator = |i: usize| text[..offsets[i - 1].1].chars().next_back().is_some_and(|c| SEPARATORS.contains(c));
+        let end = near()
+            .find(|&i| gap(i).contains('\n'))
+            .or_else(|| near().find(|&i| after_separator(i)))
+            .or_else(|| near().find(|&i| gap(i).chars().any(char::is_whitespace)))
+            .unwrap_or(hard);
         out.push((at, end));
         at = end;
     }

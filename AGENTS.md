@@ -10,7 +10,7 @@ file covers how to work on the code.
 | --- | --- |
 | `rust/holdback/src/main.rs` | CLI: `serve`, `run claude\|codex`, `status`, `review`, `keep`, `replace`, `hook`, `setup`, `doctor`, `spans <json>`; model download |
 | `rust/holdback/src/native.rs` | The Privacy Filter runtime: memory-mapped q4 weights, Accelerate on macOS, `gemm` elsewhere |
-| `rust/holdback/src/detect.rs` | Tokenizing, 128-token windows, Viterbi decoding into spans; `Detector` picks the Privacy Filter or the student |
+| `rust/holdback/src/detect.rs` | Tokenizing, 128-token windows that end at a line break, separator or space where they can, Viterbi decoding into spans; `Detector` picks the Privacy Filter or the student |
 | `rust/holdback/src/student.rs` | The distilled student: a 6-layer BERT encoder run from its memory-mapped safetensors file, its own tokenizer, 254-token windows, BIO labels into spans |
 | `rust/holdback/src/precision.rs` | Rules that keep hosts, ports, paths, dates and IDs and replace only the secret part |
 | `rust/holdback/src/vault.rs` | Placeholder assignment, the known-values pass, the user's keep and replace lists, restore, the saved map for hook mode |
@@ -64,7 +64,7 @@ Run the checks that cover what changed.
 
 | Change | Checks |
 | --- | --- |
-| `native.rs`, `detect.rs` | `cargo test`; benchmark numbers must not move |
+| `native.rs`, `detect.rs` | `cargo test`; a runtime change must not move benchmark numbers, a change to the windows is checked like a rule change |
 | `student.rs` | `HOLDBACK_STUDENT_DIR=<model dir> cargo test --release` (the logits test is skipped without it), then the benchmarks with the variable set |
 | `precision.rs` | `bench/detect_eval.py` (also `--seed 11`), `bench/public_eval.py` and `bench/dev_eval.py` (also `--held-out`) |
 | `vault.rs`, the known-values pass | `bench/public_eval.py --sequence`, which runs each set through one map in order |

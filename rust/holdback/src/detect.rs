@@ -9,6 +9,8 @@ use std::path::Path;
 const NEG_INF: f32 = -1e9;
 /// Longest token run classified as one window; the model attends 128 tokens back, so a window sees all of itself.
 const WINDOW: usize = 128;
+/// Characters after which a window may end when no line break is near; shared with the student.
+pub const SEPARATORS: &str = ",;{}[]()。，；！？";
 /// Windows classified per model call. They share each expert's weights; working memory grows with this.
 const GROUP: usize = 8;
 /// Windows whose labels are remembered, about 0.6 KB each.
@@ -216,7 +218,7 @@ impl Filter {
         let ids = self.bpe.encode_with_special_tokens(text);
         let (mut windows, mut at) = (vec![], 0);
         while at < ids.len() {
-            let end = self.pass_end(&ids, at);
+            let end = pass_end(&self.bpe, &ids, at);
             windows.push(&ids[at..end]);
             at = end;
         }
@@ -284,17 +286,6 @@ impl Filter {
         Ok(kept)
     }
 
-    /// Where the pass starting at `at` ends: after a line break near the window's end if there is one, so
-    /// that a value is not cut in two.
-    fn pass_end(&self, ids: &[u32], at: usize) -> usize {
-        let hard = at + WINDOW;
-        if hard >= ids.len() {
-            return ids.len();
-        }
-        let line_break = |i: &usize| self.bpe.decode_bytes(&[ids[*i]]).is_ok_and(|b| b.contains(&b'\n'));
-        (hard - WINDOW / 4..hard).rev().find(line_break).map_or(hard, |i| i + 1)
-    }
-
     /// Label ids for every token of `windows`, in order; each window is decoded on its own.
     fn label_tokens(&mut self, windows: &[&[u32]]) -> Result<Vec<usize>> {
         let logits = self.model.logits(windows, &mut self.work)?;
@@ -314,4 +305,24 @@ impl Filter {
         }
         Ok(path)
     }
+}
+
+/// Where the pass starting at `at` ends, so that a value is not cut in two: near the window's end, after a line
+/// break, else after a separator such as a comma or bracket (long one-line JSON has no line breaks), else before
+/// a space.
+pub fn pass_end(bpe: &tiktoken_rs::CoreBPE, ids: &[u32], at: usize) -> usize {
+    let hard = at + WINDOW;
+    if hard >= ids.len() {
+        return ids.len();
+    }
+    let piece = |i: usize| String::from_utf8_lossy(&bpe.decode_bytes(&[ids[i]]).unwrap_or_default()).into_owned();
+    let after = |rule: &dyn Fn(usize) -> bool| (hard - WINDOW / 4..hard).rev().find(|&i| rule(i)).map(|i| i + 1);
+    let separator = |i: usize| {
+        let p = piece(i);
+        p.contains(|c| SEPARATORS.contains(c)) && !p.contains(char::is_alphanumeric) // `","` yes, `,John` no
+    };
+    after(&|i| piece(i).contains('\n'))
+        .or_else(|| after(&separator))
+        .or_else(|| after(&|i| piece(i + 1).starts_with(char::is_whitespace)))
+        .unwrap_or(hard)
 }

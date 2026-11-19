@@ -251,10 +251,10 @@ commands), with made-up names, emails and keys planted at known places.
 
 | Developer output | False replacements per 100 KB | Planted values leaked |
 | --- | --- | --- |
-| Tuning corpus, detector alone | 32 | 0 of 36 |
-| Tuning corpus, with holdback's rules | 2 | 0 of 36 |
-| Held-out corpus, detector alone | 3 | 2 of 45 |
-| Held-out corpus, with holdback's rules | 1 | 0 of 45 |
+| Tuning corpus, detector alone | 36 | 0 of 39 |
+| Tuning corpus, with holdback's rules | 4 | 0 of 39 |
+| Held-out corpus, detector alone | 4 | 2 of 45 |
+| Held-out corpus, with holdback's rules | 0 | 0 of 45 |
 
 The rules were tuned on the first corpus, where lockfile checksums made up half of the false replacements. The
 held-out corpus is the source of three crates, an npm lockfile and other commands.
@@ -310,7 +310,7 @@ their own, such as dates, occupation, country and organization, are not counted.
 | Codex patterns | 91.7%, 0.0% | 100.0%, 0.0% | 99.9%, 0.0% | 99.8%, 0.0% | 100.0%, 0.0% | 93.1%, 0.2% |
 | Presidio | 38.9%, 60.8% | 66.1%, 10.3% | 32.6%, 9.8% | 19.5%, 1.1% | 8.1%, 4.5% | 83.5%, 11.6% |
 | rehydra | 16.7%, 39.2% | 50.8%, 6.6% | 38.4%, 7.8% | 31.2%, 0.3% | 19.3%, 0.6% | 77.4%, 5.4% |
-| holdback | 0.3%, 3.2% | 14.4%, 17.5% | 12.7%, 11.1% | 10.8%, 0.3% | 9.7%, 0.6% | 32.5%, 10.1% |
+| holdback | 0.3%, 3.2% | 14.4%, 17.5% | 12.7%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
 
 | Task success, one run, 186 tasks | Raw | Codex patterns | Presidio | rehydra | holdback |
 | --- | --- | --- | --- | --- | --- |
@@ -326,7 +326,7 @@ Nemotron-PII, holdback's rules keep some dates of birth and ID numbers that the 
 which raises its leak rate by one to two points. The rule that recognizes a date of birth was widened after the
 first Nemotron-PII run, where holdback leaked 14.6%.
 
-On CredData the detector alone leaks 15.5%. holdback's rules raise that to 32.5%, mostly by keeping UUIDs. The
+On CredData the detector alone leaks 15.9%. holdback's rules raise that to 32.4%, mostly by keeping UUIDs. The
 rule that keeps commit hashes and UUIDs was narrowed after the first CredData run, where holdback leaked 42.9%:
 a hex string or UUID assigned to a name such as `secret` or `token` is now replaced.
 

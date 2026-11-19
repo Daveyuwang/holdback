@@ -50,8 +50,9 @@ static STRUCTURE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"(?i)\b(?:no-?reply|do-?not-?reply)@[a-z0-9-]+(?:\.[a-z0-9-]+)+\b", // an address nobody reads
         r"\bClaude (?:Code|Opus|Sonnet|Haiku|Fable)\b(?: \d+(?:\.\d+)*)?", // the agent's own name, as in a commit trailer
         r"(?m)^\s*[-*] ([a-z][a-z0-9_-]*):(?= )", // the key of a definition list, as in a list of skills or commands
-        // a checksum: hex after a word that says so, as in a lockfile
+        // a checksum: hex after a word that says so, as in a lockfile, and the algorithm in front of it
         r"(?i)(?:checksum|sha(?:1|256|384|512)|md5|hash|digest|integrity)\W{1,12}([0-9a-f]{32,128})\b",
+        r"(?i)\b(?:sha(?:1|224|256|384|512)|md5):[0-9a-f]{32,128}\b", // uv.lock hashes, image digests
         // a Subresource Integrity hash, as npm and yarn lockfiles and HTML integrity attributes write it
         r"\bsha(?:1|256|384|512)-[A-Za-z0-9+/]{27,}={0,2}",
         // a line of a Python wheel's RECORD file: path, hash and size
@@ -366,6 +367,8 @@ mod tests {
         assert!(!replaced("upgrade to version 12.4.1 today", "12.4.1", "account_number"));
         assert!(!replaced("nc: connect to db.internal.example.io port 5433 failed", "db.internal.example.io", "private_url"));
         assert!(!replaced("database orders is ready", "orders", "private_url"));
+        let digest = "hash = \"sha256:0f3c9a7e5b1d2c4a6e8f0b1d3c5a7e9f1b3d5c7a9e0f2b4d6c8a0e1f3b5d7c9a\"";
+        assert!(super::refine(digest, &[Span { start: digest.find("sha").unwrap(), end: digest.len() - 1, label: "secret".into() }]).is_empty());
         let host = "psql: could not connect to db.internal.example.io:5433/orders";
         assert!(super::refine(host, &[Span { start: host.find("db.").unwrap(), end: host.len(), label: "private_url".into() }]).is_empty());
         assert!(!replaced("src/lib.rs\nCargo.toml\nREADME.md", "Cargo.toml", "private_person"));
@@ -454,6 +457,42 @@ mod tests {
             for v in *replaced {
                 assert!(hit(v), "{v:?} was kept in {text:?}");
             }
+        }
+    }
+
+    /// A one-line JSON response has no line break for a window to end at. No name or email in it may be cut in two
+    /// by a window edge and replaced only in part, by the Privacy Filter or, with HOLDBACK_STUDENT_DIR, the student.
+    #[test]
+    fn keeps_values_whole_at_window_edges() {
+        let (first, last) = (["Maria", "Daniel", "Priya", "Hannah", "Oliver", "Sofia", "Lucas", "Aisha"], ["Gonzalez", "Okafor", "Raman", "Becker", "Clarke", "Rossi", "Novak", "Dubois"]);
+        let mut values = vec![];
+        let records: Vec<String> = (0..200)
+            .map(|i| {
+                let (f, l) = (first[i % 8], last[i / 8 % 8]);
+                let (name, email) = (format!("{f} {l}"), format!("{}.{}{i}@example.com", f.to_lowercase(), l.to_lowercase()));
+                let record = format!(r#"{{"id":{},"status":"active","name":"{name}","email":"{email}","region":"eu-west-1"}}"#, 10_000 + i);
+                values.extend([name, email]);
+                record
+            })
+            .collect();
+        let text = format!(r#"{{"users":[{}],"next":null}}"#, records.join(","));
+        let mut detectors = vec![crate::detect::Detector::load(&crate::model_dir()).unwrap()];
+        if let Ok(dir) = std::env::var("HOLDBACK_STUDENT_DIR") {
+            detectors.push(crate::detect::Detector::Student(Box::new(crate::student::Student::load(std::path::Path::new(&dir)).unwrap())));
+        }
+        for mut detector in detectors {
+            let spans = detector.detect(&text).unwrap();
+            let (mut at, mut cut) = (0, vec![]);
+            for v in &values {
+                let start = at + text[at..].find(v.as_str()).unwrap();
+                at = start + v.len();
+                let inside: Vec<usize> = (start..at).filter(|&i| !b" @.".contains(&text.as_bytes()[i])).collect();
+                let hit = inside.iter().filter(|&&i| spans.iter().any(|s| s.start <= i && i < s.end)).count();
+                if 0 < hit && hit < inside.len() {
+                    cut.push(v);
+                }
+            }
+            assert!(cut.is_empty(), "{} replaced only part of {cut:?}", detector.name());
         }
     }
 }
