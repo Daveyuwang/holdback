@@ -263,8 +263,10 @@ pub fn refine(text: &str, spans: &[Span]) -> Vec<Span> {
         if matches!(sp.label.as_str(), "secret" | "private_address") && is_name(value) && !named_secret {
             continue;
         }
-        // a constant in code or a file name is not a person: `SWIGLU_ALPHA`, `Cargo.toml`
-        if sp.label == "private_person" && (CONSTANT.is_match(value).unwrap_or(false) || FILE_NAME.is_match(value).unwrap_or(false)) {
+        // a constant in code or a file name is not a person: `SWIGLU_ALPHA`, `Cargo.toml`; a mention after @ is a user,
+        // even when it looks like a constant (`<@U02LIZ_MARCHETTI>` in Slack)
+        let mention = text[..sp.start].ends_with('@');
+        if sp.label == "private_person" && !mention && (CONSTANT.is_match(value).unwrap_or(false) || FILE_NAME.is_match(value).unwrap_or(false)) {
             continue;
         }
         // the same name taken for a person, when it has a digit and three parts or more:
@@ -339,6 +341,7 @@ mod tests {
         assert!(!replaced(lock, "bytemuck_derive", "private_person"));
         assert!(!replaced("-rwxr-xr-x  1 root  wheel  196320 Aug 12 21:51 bputil", "bputil", "private_person"));
         assert!(!replaced("const SWIGLU_ALPHA: f32 = 1.702;", "SWIGLU_ALPHA", "private_person"));
+        assert!(replaced("good call <@U02LIZ_MARCHETTI>, thanks", "U02LIZ_MARCHETTI", "private_person"));
         assert!(super::refine("tiktoken-rs = \"0.12.1\"\nmax_tokens = 100000\ntokenizer = \"o200k_base\"", &[]).is_empty());
         assert_eq!(super::refine("auth_token = \"hunter2hunter2\"\n\"accessToken\": \"hunter2hunter2\"\nGITHUB_TOKEN=hunter2hunter2", &[]).len(), 3);
         assert!(replaced("signing key 234113d19d0d7d613b40e86fb654acf958910802bcceab913a4f9e7cda03b1a4", "234113d19d0d7d613b40e86fb654acf958910802bcceab913a4f9e7cda03b1a4", "secret"));
