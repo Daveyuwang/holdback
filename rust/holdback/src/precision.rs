@@ -52,6 +52,17 @@ static STRUCTURE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"(?m)^\s*[-*] ([a-z][a-z0-9_-]*):(?= )", // the key of a definition list, as in a list of skills or commands
         // a checksum: hex after a word that says so, as in a lockfile
         r"(?i)(?:checksum|sha(?:1|256|384|512)|md5|hash|digest|integrity)\W{1,12}([0-9a-f]{32,128})\b",
+        // a Subresource Integrity hash, as npm and yarn lockfiles and HTML integrity attributes write it
+        r"\bsha(?:1|256|384|512)-[A-Za-z0-9+/]{27,}={0,2}",
+        // a line of a Python wheel's RECORD file: path, hash and size
+        r"\bsha(?:1|224|256|384|512)=[A-Za-z0-9_-]{27,}=*",
+        r"(?m)^([^,\s][^,\n]*),sha(?:1|224|256|384|512)=[A-Za-z0-9_-]+=*,(\d*)$",
+        // a package with its version after @, as Homebrew names formulae (openssl@3); an email has a domain there
+        r"\b[a-z0-9][a-z0-9+_.-]*@\d+(?:\.\d+)*\b(?![.@\w])",
+        // a path under a system directory; user names live under /Users and /home, which a rule above handles
+        r#"(?:^|[\s"'=(])(/(?:opt|usr|etc|Library|Applications|System|nix|bin|sbin)(?:/[^\s"',;]+)+)"#,
+        // seconds or milliseconds since 1970 under a key that names a time
+        r#"(?i)"[\w-]*(?:time|timestamp|_at)":\s*(\d{9,13})\b"#,
         // a package name in a manifest or lockfile: `name = "x"`, or a line that is only a quoted name
         r#"(?m)^name = "([a-z0-9][a-z0-9_.-]*)""#,
         r#"(?m)^\s*"([a-z0-9][a-z0-9_.-]*)(?: [^"\n]*)?",?$"#,
@@ -331,6 +342,21 @@ mod tests {
         assert!(super::refine("tiktoken-rs = \"0.12.1\"\nmax_tokens = 100000\ntokenizer = \"o200k_base\"", &[]).is_empty());
         assert_eq!(super::refine("auth_token = \"hunter2hunter2\"\n\"accessToken\": \"hunter2hunter2\"\nGITHUB_TOKEN=hunter2hunter2", &[]).len(), 3);
         assert!(replaced("signing key 234113d19d0d7d613b40e86fb654acf958910802bcceab913a4f9e7cda03b1a4", "234113d19d0d7d613b40e86fb654acf958910802bcceab913a4f9e7cda03b1a4", "secret"));
+        let record = "requests/__init__.py,sha256=Vn7I4lQ9VtgNnYxWQqzKqFWlYG4K5HfdG7rqLKZG8eA,5139\nrequests-2.32.3.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4";
+        assert!(!replaced(record, "Vn7I4lQ9VtgNnYxWQqzKqFWlYG4K5HfdG7rqLKZG8eA", "secret"));
+        assert!(!replaced(record, "requests-2.32.3.dist-info/INSTALLER", "private_url"));
+        assert!(!replaced(record, "5139", "account_number"));
+        assert!(!replaced("\"full_name\": \"openssl@3\",\n\"versioned\": [\"python@3.12\"]", "openssl@3", "private_email"));
+        assert!(!replaced("\"full_name\": \"openssl@3\",\n\"versioned\": [\"python@3.12\"]", "python@3.12", "private_email"));
+        assert!(replaced("write to jane.doe@example.com today", "jane.doe@example.com", "private_email"));
+        assert!(!replaced("\"cellar\": \"/opt/homebrew/Cellar\",", "Cellar", "private_person"));
+        assert!(replaced("cd /home/jsmith/src/app", "jsmith", "private_person"));
+        assert!(replaced("mail is in /var/mail/jsmith", "jsmith", "private_person"));
+        assert!(!replaced("\"installed_time\": 1794938741,", "1794938741", "private_phone"));
+        assert!(replaced("\"phone\": 13800138000,", "13800138000", "private_phone"));
+        let sri = "\"integrity\": \"sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==\",";
+        assert!(!replaced(sri, "vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g", "secret"));
+        assert!(!replaced("<script src=\"x.js\" integrity=\"sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC\">", "oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K", "secret"));
         assert!(replaced("name = \"Maria Gonzalez\"", "Maria Gonzalez", "private_person"));
         assert!(replaced("SSN on file: 123.45.6789", "123.45.6789", "account_number"));
         assert!(!replaced("upgrade to version 12.4.1 today", "12.4.1", "account_number"));
