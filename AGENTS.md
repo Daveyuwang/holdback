@@ -10,7 +10,8 @@ file covers how to work on the code.
 | --- | --- |
 | `rust/holdback/src/main.rs` | CLI: `serve`, `run claude\|codex`, `status`, `review`, `keep`, `replace`, `hook`, `setup`, `doctor`, `spans <json>`; model download |
 | `rust/holdback/src/native.rs` | The Privacy Filter runtime: memory-mapped q4 weights, Accelerate on macOS, `gemm` elsewhere |
-| `rust/holdback/src/detect.rs` | Tokenizing, 128-token windows, Viterbi decoding into spans |
+| `rust/holdback/src/detect.rs` | Tokenizing, 128-token windows, Viterbi decoding into spans; `Detector` picks the Privacy Filter or the student |
+| `rust/holdback/src/student.rs` | The distilled student: a 6-layer BERT encoder run from its memory-mapped safetensors file, its own tokenizer, 254-token windows, BIO labels into spans |
 | `rust/holdback/src/precision.rs` | Rules that keep hosts, ports, paths, dates and IDs and replace only the secret part |
 | `rust/holdback/src/vault.rs` | Placeholder assignment, the known-values pass, the user's keep and replace lists, restore, the saved map for hook mode |
 | `rust/holdback/src/hooks.rs` | Hook mode: Claude Code hook events in, hook answers out |
@@ -52,8 +53,9 @@ locally before a normal push.
   byte-identical and prompt caching keeps working.
 - **Thinking blocks pass through untouched.** Providers sign them.
 - **Runtime parity.** `native::tests::matches_onnx_runtime` compares logits with ONNX Runtime's reference output
-  in `src/testdata/logits.json`. A runtime change that fails it changes model output; do not loosen the tolerance
-  to make it pass.
+  in `src/testdata/logits.json`, and `student::tests::matches_pytorch` compares the student's with PyTorch's in
+  `src/testdata/student_logits.json`. A runtime change that fails them changes model output; do not loosen the
+  tolerance to make them pass.
 - **Tests use synthetic values.** No real names, emails or keys in code, tests or fixtures.
 
 ## Checking a change
@@ -63,6 +65,7 @@ Run the checks that cover what changed.
 | Change | Checks |
 | --- | --- |
 | `native.rs`, `detect.rs` | `cargo test`; benchmark numbers must not move |
+| `student.rs` | `HOLDBACK_STUDENT_DIR=<model dir> cargo test --release` (the logits test is skipped without it), then the benchmarks with the variable set |
 | `precision.rs` | `bench/detect_eval.py` (also `--seed 11`), `bench/public_eval.py` and `bench/dev_eval.py` (also `--held-out`) |
 | `vault.rs`, the known-values pass | `bench/public_eval.py --sequence`, which runs each set through one map in order |
 | `protocols.rs`, `server.rs` | `bench/check_proxy.py`, then `bench/check_agents.py` with Claude Code and Codex |
@@ -91,6 +94,7 @@ the public sets are the held-out check: report both.
 | `HOLDBACK_UPSTREAMS` | Extra upstreams, `name=https://host/base,other=...` |
 | `HOLDBACK_KEY_ENV` | Variable that holds the upstream key for `run codex`, default `OPENAI_API_KEY` |
 | `HOLDBACK_MODEL_DIR` | Model directory instead of the cache |
+| `HOLDBACK_STUDENT_DIR` | Use the distilled student instead of the Privacy Filter: a directory with `config.json`, `model.safetensors` (f32) and `tokenizer.json`. Experimental; the model is not published yet |
 | `HOLDBACK_DUMP` | Append each redacted upstream request to this file, for the checks |
 | `HOLDBACK_HOOKS` | `1` switches hook mode on for sessions that are not routed through the proxy |
 | `HOLDBACK_STATE_DIR` | Where hook mode saves its placeholder map, default `~/.local/state/holdback` |

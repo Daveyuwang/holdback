@@ -99,7 +99,8 @@ def run(crate: str, src: Path, name: str, prompt: str, check, hooks: bool, a, re
     copy, port = work / "repo", free_port()
     shutil.copytree(src, copy)
     (copy / ".env").write_text(ENV)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDECODE", "CLAUDE_CODE_", "HOLDBACK_"))}
+    keep = ("HOLDBACK_STUDENT_DIR",)  # the detector under test; other holdback settings of this machine stay out
+    env = {k: v for k, v in os.environ.items() if k in keep or not k.startswith(("CLAUDECODE", "CLAUDE_CODE_", "HOLDBACK_"))}
     env |= {"ANTHROPIC_BASE_URL": f"http://127.0.0.1:{recorder_port}/{run_id}", "HOLDBACK_PORT": str(port), "HOLDBACK_STATE_DIR": str(work / "state"),
             "HOLDBACK_CONFIG_DIR": str(work / "config"), "PATH": f"{Path(BINARY).parent}{os.pathsep}{os.environ['PATH']}"}
     if hooks:

@@ -6,6 +6,7 @@ mod precision;
 mod protocols;
 mod server;
 mod setup;
+mod student;
 mod vault;
 
 use anyhow::{Context, Result, bail};
@@ -115,6 +116,12 @@ async fn ensure_model(dir: &Path) -> Result<()> {
 }
 
 async fn load_detector() -> Result<detect::Detector> {
+    if let Ok(dir) = std::env::var("HOLDBACK_STUDENT_DIR") {
+        eprintln!("Loading the distilled privacy model from {dir}...");
+        let mut detector = detect::Detector::Student(Box::new(student::Student::load(Path::new(&dir)).context("could not load the distilled model")?));
+        detector.detect("Warm-up: Alice Example, alice@example.com")?;
+        return Ok(detector);
+    }
     let dir = model_dir();
     if MODEL_FILES.iter().any(|f| !dir.join(f).exists()) {
         eprintln!("Downloading the privacy model (OpenAI Privacy Filter, q4, about 0.9 GB) to {}", dir.display());

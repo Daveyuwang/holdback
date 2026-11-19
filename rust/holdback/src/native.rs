@@ -362,7 +362,7 @@ fn gemm_bt(a: &[f32], w: &[f32], m: usize, n: usize, k: usize, y: &mut [f32]) {
 /// C = op(A) * op(B) for row-major matrices, where op transposes when `ta` / `tb` is set. Apple's Accelerate on
 /// macOS; elsewhere the pure-Rust `gemm` crate, which gives the same spans (checked on all benchmark sets).
 #[allow(clippy::too_many_arguments)]
-fn sgemm(ta: bool, tb: bool, m: usize, n: usize, k: usize, a: &[f32], lda: usize, b: &[f32], ldb: usize, c: &mut [f32], ldc: usize) {
+pub(crate) fn sgemm(ta: bool, tb: bool, m: usize, n: usize, k: usize, a: &[f32], lda: usize, b: &[f32], ldb: usize, c: &mut [f32], ldc: usize) {
     #[cfg(target_os = "macos")]
     {
         #[link(name = "Accelerate", kind = "framework")]

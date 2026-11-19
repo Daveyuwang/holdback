@@ -162,7 +162,27 @@ fn labels_to_spans(path: &[usize], l: &Labels) -> Vec<(usize, usize, usize)> {
     out
 }
 
-pub struct Detector {
+/// The detector holdback uses: the Privacy Filter, or the distilled student when HOLDBACK_STUDENT_DIR is set.
+pub enum Detector {
+    Filter(Box<Filter>),
+    Student(Box<crate::student::Student>),
+}
+
+impl Detector {
+    pub fn load(dir: &Path) -> Result<Self> {
+        Ok(Detector::Filter(Box::new(Filter::load(dir)?)))
+    }
+
+    /// Private-value spans with byte offsets into `text`, non-overlapping and sorted.
+    pub fn detect(&mut self, text: &str) -> Result<Vec<Span>> {
+        match self {
+            Detector::Filter(f) => f.detect(text),
+            Detector::Student(s) => s.detect(text),
+        }
+    }
+}
+
+pub struct Filter {
     model: Model,
     work: Work,
     bpe: tiktoken_rs::CoreBPE,
@@ -175,12 +195,12 @@ pub struct Detector {
     labelled: HashMap<Vec<u32>, Vec<u8>>,
 }
 
-impl Detector {
+impl Filter {
     pub fn load(dir: &Path) -> Result<Self> {
         let cfg: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("config.json"))?)?;
         let labels = Labels::from_config(&cfg)?;
         let (start, end, trans) = labels.tables();
-        Ok(Detector { model: Model::load(dir)?, work: Work::default(), bpe: tiktoken_rs::o200k_base()?, labels, start, end, trans, labelled: HashMap::new() })
+        Ok(Filter { model: Model::load(dir)?, work: Work::default(), bpe: tiktoken_rs::o200k_base()?, labels, start, end, trans, labelled: HashMap::new() })
     }
 
     /// Private-value spans with byte offsets into `text`, non-overlapping and sorted.
