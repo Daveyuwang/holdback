@@ -77,12 +77,12 @@ pub fn app(vault: Vault, store: std::path::PathBuf) -> Router {
 }
 
 async fn status(State(st): State<Arc<AppState>>) -> Response {
-    let (distinct, retired) = {
+    let (distinct, retired, detector) = {
         let v = st.vault.lock().unwrap();
-        (v.distinct_values(), v.retired())
+        (v.distinct_values(), v.retired(), v.detector_name())
     };
     let recent: Vec<Value> = st.recent.lock().unwrap().iter().take(50).cloned().collect();
-    axum::Json(json!({"version": crate::setup::VERSION, "retired_values": retired, "upstreams": st.upstreams, "replaced_by_type": *st.usage.lock().unwrap(), "distinct_values": distinct, "recent": recent}))
+    axum::Json(json!({"version": crate::setup::VERSION, "detector": detector, "retired_values": retired, "upstreams": st.upstreams, "replaced_by_type": *st.usage.lock().unwrap(), "distinct_values": distinct, "recent": recent}))
         .into_response()
 }
 

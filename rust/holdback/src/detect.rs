@@ -180,6 +180,14 @@ impl Detector {
             Detector::Student(s) => s.detect(text),
         }
     }
+
+    /// The name the status page and `holdback doctor` show.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Detector::Filter(_) => "privacy-filter",
+            Detector::Student(_) => "student",
+        }
+    }
 }
 
 pub struct Filter {

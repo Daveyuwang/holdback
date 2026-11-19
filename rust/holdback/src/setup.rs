@@ -57,15 +57,23 @@ pub async fn doctor(port: u16) -> Result<()> {
         false => say("FIX", format!("the holdback command is not on PATH: add {} to PATH in your shell profile", exe.parent().unwrap().display())),
     }
 
-    let model = crate::model_dir();
-    match crate::MODEL_FILES.iter().all(|f| model.join(f).exists()) {
-        true => say("ok", format!("the privacy model is in {}", model.display())),
-        false => say("note", "the privacy model is not downloaded yet; the first start downloads about 0.9 GB".into()),
+    if let Ok(dir) = std::env::var("HOLDBACK_STUDENT_DIR") {
+        let missing: Vec<&str> = ["config.json", "model.safetensors", "tokenizer.json"].into_iter().filter(|f| !std::path::Path::new(&dir).join(f).exists()).collect();
+        match missing.is_empty() {
+            true => say("ok", format!("HOLDBACK_STUDENT_DIR: the distilled model is in {dir}")),
+            false => say("FIX", format!("HOLDBACK_STUDENT_DIR points at {dir}, which has no {}", missing.join(", "))),
+        }
+    } else {
+        let model = crate::model_dir();
+        match crate::MODEL_FILES.iter().all(|f| model.join(f).exists()) {
+            true => say("ok", format!("the privacy model is in {}", model.display())),
+            false => say("note", "the privacy model is not downloaded yet; the first start downloads about 0.9 GB".into()),
+        }
     }
 
     let status = crate::ask(port, "status").await;
     match &status {
-        Some(st) if st["version"] == VERSION => say("ok", format!("the local process is running on port {port}")),
+        Some(st) if st["version"] == VERSION => say("ok", format!("the local process is running on port {port} with the {} detector", st["detector"].as_str().unwrap_or("privacy-filter"))),
         Some(st) => say("FIX", format!("the local process on port {port} is version {}, this command is {VERSION}: stop it with `pkill -f \"holdback serve\"`; the next session starts the new one", st["version"].as_str().unwrap_or("older than 0.1.0"))),
         None => say("note", format!("no local process on port {port}; a session or `holdback run` starts it")),
     }

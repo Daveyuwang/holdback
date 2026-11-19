@@ -63,6 +63,10 @@ pub struct Vault {
 }
 
 impl Vault {
+    pub fn detector_name(&self) -> &'static str {
+        self.detector.name()
+    }
+
     pub fn new(detector: Detector) -> Self {
         // Numbers start above 100, so a placeholder written as an example in a document, such as
         // [PRIVATE_EMAIL_2], is not taken for a real one and replaced with a value.
