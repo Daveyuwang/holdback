@@ -59,8 +59,8 @@ static STRUCTURE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"(?m)^([^,\s][^,\n]*),sha(?:1|224|256|384|512)=[A-Za-z0-9_-]+=*,(\d*)$",
         // a package with its version after @, as Homebrew names formulae (openssl@3); an email has a domain there
         r"\b[a-z0-9][a-z0-9+_.-]*@\d+(?:\.\d+)*\b(?![.@\w])",
-        // a path under a system directory; user names live under /Users and /home, which a rule above handles
-        r#"(?:^|[\s"'=(])(/(?:opt|usr|etc|Library|Applications|System|nix|bin|sbin)(?:/[^\s"',;]+)+)"#,
+        // a path under a system directory; user names live under /Users, /home and FreeBSD's /usr/home
+        r#"(?:^|[\s"'=(])(/(?:opt|usr(?!/home/)|etc|Library|Applications|System|nix|bin|sbin)(?:/[^\s"',;]+)+)"#,
         // seconds or milliseconds since 1970 under a key that names a time
         r#"(?i)"[\w-]*(?:time|timestamp|_at)":\s*(\d{9,13})\b"#,
         // a package name in a manifest or lockfile: `name = "x"`, or a line that is only a quoted name
@@ -352,6 +352,7 @@ mod tests {
         assert!(!replaced("\"cellar\": \"/opt/homebrew/Cellar\",", "Cellar", "private_person"));
         assert!(replaced("cd /home/jsmith/src/app", "jsmith", "private_person"));
         assert!(replaced("mail is in /var/mail/jsmith", "jsmith", "private_person"));
+        assert!(replaced("cd /usr/home/jsmith/src", "jsmith", "private_person"));
         assert!(!replaced("\"installed_time\": 1794938741,", "1794938741", "private_phone"));
         assert!(replaced("\"phone\": 13800138000,", "13800138000", "private_phone"));
         let sri = "\"integrity\": \"sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==\",";
