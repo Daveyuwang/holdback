@@ -135,6 +135,14 @@ fn is_name(value: &str) -> bool {
     JOINED_WORDS.is_match(value).unwrap_or(false) && parts.iter().any(word) && !parts.iter().any(random)
 }
 
+/// The run of name characters (letters, digits, `-`, `_`, `.`) around a span, without dots or dashes at its ends.
+fn enclosing_name(text: &str, start: usize, end: usize) -> &str {
+    let name_char = |c: char| c.is_ascii_alphanumeric() || "-_.".contains(c);
+    let s = text[..start].char_indices().rev().take_while(|&(_, c)| name_char(c)).last().map_or(start, |(i, _)| i);
+    let e = end + text[end..].chars().take_while(|&c| name_char(c)).count();
+    text[s..e].trim_matches(['.', '-', '_'])
+}
+
 /// The agents themselves. Alone, the name is the assistant; "Claude Dubois" is still a person.
 const AGENT_NAMES: &[&str] = &["claude", "codex"];
 /// `plugin:skill`, `image:tag`, `package:target`: lowercase names joined by a colon, with a hyphen or underscore
@@ -258,10 +266,12 @@ pub fn refine(text: &str, spans: &[Span]) -> Vec<Span> {
         if matches!(sp.label.as_str(), "private_person" | "private_url") && namespaced.iter().any(|&(s, e)| s <= sp.start && sp.end <= e) {
             continue;
         }
-        // a build target or a folder name is not a secret or an address, unless the text calls it a secret
+        // a build target or a folder name is not a secret or an address, unless the text calls it a secret; a span
+        // inside such a name, like the end of the pod name `tickets-svc-3de40b-xbgw0`, is judged by the whole name
         let value = &text[sp.start..sp.end];
+        let name = enclosing_name(text, sp.start, sp.end);
         let named_secret = SECRET_NEAR.is_match(chars_before(text, sp.start, 32)).unwrap_or(false);
-        if matches!(sp.label.as_str(), "secret" | "private_address") && is_name(value) && !named_secret {
+        if matches!(sp.label.as_str(), "secret" | "private_address") && is_name(name) && !named_secret {
             continue;
         }
         // a constant in code or a file name is not a person: `SWIGLU_ALPHA`, `Cargo.toml`; a mention after @ is a user,
@@ -367,6 +377,9 @@ mod tests {
         assert!(!replaced("upgrade to version 12.4.1 today", "12.4.1", "account_number"));
         assert!(!replaced("nc: connect to db.internal.example.io port 5433 failed", "db.internal.example.io", "private_url"));
         assert!(!replaced("database orders is ready", "orders", "private_url"));
+        assert!(!replaced("pod tickets-svc-3de40b-xbgw0 restarted", "3de40b-xbgw0", "secret"));
+        assert!(replaced("export GITHUB_TOKEN=build-svc-3de40b-xbgw0", "3de40b-xbgw0", "secret"));
+        assert!(replaced("ping @maria-gonzalez-1990 about it", "maria-gonzalez", "private_person"));
         let digest = "hash = \"sha256:0f3c9a7e5b1d2c4a6e8f0b1d3c5a7e9f1b3d5c7a9e0f2b4d6c8a0e1f3b5d7c9a\"";
         assert!(super::refine(digest, &[Span { start: digest.find("sha").unwrap(), end: digest.len() - 1, label: "secret".into() }]).is_empty());
         let host = "psql: could not connect to db.internal.example.io:5433/orders";
