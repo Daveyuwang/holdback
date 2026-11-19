@@ -1,18 +1,18 @@
 # Status and next steps
 
-## 0.1.0
+## 0.1.1
 
 holdback keeps personal data and secrets out of what coding agents send to cloud models, in two modes: a
 local proxy that redacts whole requests, and hooks inside Claude Code that redact what tools return. The
 README has the measurements and the limits.
 
-What the first release rests on:
+What the release rests on:
 
 - Task success stays at 98 to 100% on the task benchmark, and at 44 to 45 of 45 real agent tasks with hook
   mode on, the same as with it off.
 - No planted value appears in any recorded request in the hook-mode checks, on Haiku 5.5, Sonnet 5.5 and
   Opus 5.5.
-- 1 to 2 false replacements per 100 KB of developer output.
+- 0 to 4 false replacements per 100 KB of developer output.
 - Binaries for macOS and Linux, built and checked on clean machines by the release workflow.
 
 ## Known gaps
@@ -25,9 +25,11 @@ What the first release rests on:
 
 ## Next
 
-1. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
-2. Recall on Chinese personal names.
-3. Faster checking of new content.
-4. Homebrew and npm packages, when asked for.
+1. Publish the distilled detector with its training and evaluation code, and decide whether it becomes the
+   default. In the first measurements it missed 13% of the Chinese names in a news test set where the Privacy
+   Filter missed 67%, though it takes more common words for names. It found secrets in code about as often and
+   checked text 7 to 14 times faster on an Apple M5.
+2. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
+3. Homebrew and npm packages, when asked for.
 
 Reports of wrong replacements are welcome. `holdback review --masked` output is safe to attach to an issue.
