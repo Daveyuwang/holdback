@@ -49,7 +49,7 @@ impl Student {
     pub fn detect(&mut self, text: &str) -> Result<Vec<Span>> {
         let enc = self.tok.encode(text, false).map_err(|e| anyhow!("{e}"))?;
         let (ids, offsets) = (enc.get_ids(), enc.get_offsets());
-        let windows: Vec<&[u32]> = ids.chunks(BODY).collect();
+        let windows: Vec<&[u32]> = cuts(text, offsets).into_iter().map(|(a, b)| &ids[a..b]).collect();
         let new: Vec<&[u32]> = windows.iter().copied().filter(|w| !self.labelled.contains_key(*w)).collect();
         let mut fresh: HashMap<&[u32], Vec<u8>> = HashMap::new();
         for group in new.chunks(GROUP) {
@@ -91,6 +91,29 @@ impl Student {
         spans.retain(|sp| sp.end > sp.start);
         Ok(spans)
     }
+}
+
+/// Token ranges of at most BODY tokens. A window ends after a line break in its last quarter if there is one, else
+/// after whitespace there, so that a value is not cut in two; a value cut at a window edge can lose half its
+/// replacement.
+fn cuts(text: &str, offsets: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let gap = |i: usize| {
+        let (a, b) = (offsets[i - 1].1, offsets[i].0);
+        if a < b { &text[a..b] } else { "" }
+    };
+    let (mut out, mut at) = (vec![], 0);
+    while at < offsets.len() {
+        let hard = at + BODY;
+        if hard >= offsets.len() {
+            out.push((at, offsets.len()));
+            break;
+        }
+        let near = hard - BODY / 4..=hard;
+        let end = near.clone().rev().find(|&i| gap(i).contains('\n')).or_else(|| near.rev().find(|&i| gap(i).chars().any(char::is_whitespace))).unwrap_or(hard);
+        out.push((at, end));
+        at = end;
+    }
+    out
 }
 
 struct Bert {
