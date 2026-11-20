@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- The experimental distilled detector is on Hugging Face:
+  [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student). Download it and point
+  `HOLDBACK_STUDENT_DIR` at its folder; the model card has the commands and the measurements.
+- The distilled detector's memory on long input is back down. 0.1.1's new window cuts had raised its peak for an
+  8,192-token input from 110 to 165 MB; its working buffers are now sized once, and its output is unchanged.
+
 ## 0.1.1
 
 - A name or email in long input without line breaks, such as a one-line JSON response, could be cut by the edge

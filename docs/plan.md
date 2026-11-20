@@ -1,6 +1,6 @@
 # Status and next steps
 
-## 0.1.1
+## 0.1.2
 
 holdback keeps personal data and secrets out of what coding agents send to cloud models, in two modes: a
 local proxy that redacts whole requests, and hooks inside Claude Code that redact what tools return. The
