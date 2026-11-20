@@ -1,0 +1,49 @@
+name: Missed value
+description: holdback left a private value in place.
+labels: [missed value]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Use made-up values of the same shape. If holdback detected the value and still sent it, report it
+        privately instead, as SECURITY.md describes. If a real secret reached a provider, rotate it.
+  - type: input
+    id: version
+    attributes:
+      label: holdback version
+      description: The output of `holdback --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Proxy (holdback run or holdback serve)
+        - Hook mode
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of value
+      options: [Name, Email, Phone number, Address, Account or ID number, Secret or key, Date of birth, URL, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: >-
+        A made-up text of the same shape that holdback leaves in place, and which part should be replaced. Say where
+        the text came from, such as a file the agent read or the output of a command.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: private
+    attributes:
+      label: Before you send
+      options:
+        - label: This report holds no real private value.
+          required: true

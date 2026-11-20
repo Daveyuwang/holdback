@@ -155,8 +155,8 @@ passes through to the upstream unchanged.
 ## Behavior
 
 - **Replaced:** names, emails, phone numbers, addresses, account and card numbers, dates of birth, passwords,
-  API keys and tokens, and the user name in file paths. In a URL or connection string, holdback replaces only
-  the password, token or key.
+  API keys and tokens, and the user name in file paths and `ls -l` listings. In a URL or connection string,
+  holdback replaces only the password, token or key.
 - **Kept:** hosts, ports, paths, dates, versions, UUIDs, commit hashes, private IP addresses, cloud regions,
   ticket and order numbers, and numbers standing alone, such as counts and process ids. Agents need them, and none
   of them identifies a person.
@@ -178,6 +178,10 @@ keep that output away from models and logs. `holdback review --masked` prints on
 To correct holdback, `holdback keep VALUE` stops a value from being replaced, and `holdback replace VALUE`
 makes holdback replace a value the detector misses, such as a name. Both take effect on the next request and
 are stored in `~/.config/holdback/lists.json`.
+
+To tell us about a wrong replacement or a missed value, [open an issue](https://github.com/Daveyuwang/holdback/issues/new/choose)
+with `holdback review --masked` output or, in hook mode, the matching lines of `~/.local/state/holdback/sightings.log`,
+which hold shapes too. A value that holdback detected and still sent is a security bug: see [SECURITY.md](SECURITY.md).
 
 ## Limits
 
@@ -263,11 +267,12 @@ commands), with made-up names, emails and keys planted at known places.
 | Tuning corpus, detector alone | 12 | 0 of 39 |
 | Tuning corpus, with holdback's rules | 2 | 0 of 39 |
 | Held-out corpus, detector alone | 31 | 0 of 45 |
-| Held-out corpus, with holdback's rules | 2 | 0 of 45 |
+| Held-out corpus, with holdback's rules | 3 | 0 of 45 |
 
 The rules were tuned on the first corpus. The held-out corpus is the source of three crates, an npm lockfile and
 other commands; the distilled model alone takes the npm lockfile's integrity hashes for secrets, and the rules
-keep them. With the Privacy Filter the rules leave 3 and 0 false replacements per 100 KB.
+keep them. With the Privacy Filter the rules leave 3 and 0 false replacements per 100 KB. Command output differs
+from machine to machine and from run to run, so these counts move by one or two.
 
 On developer text that does name real people, `bench/dev_eval.py --authors` counts what holdback replaces in the
 `authors` lists of the nine crates that `bench/real_eval.py` uses: 12 of the 14 names and all 12 emails, against 8

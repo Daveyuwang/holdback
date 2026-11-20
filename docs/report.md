@@ -136,8 +136,9 @@ columns are not held out for it. On sets no training row comes from, it misses f
 | CredData credentials from files no earlier sample used | 20.2% | 19.9% |
 
 **False replacements on developer output.** On text with nothing private in it (this repository's source and
-lockfiles, the output of common commands) holdback replaces 2 values per 100 KB, on the corpus the rules were
-tuned on and on one they were not. No planted value leaks from either corpus.
+lockfiles, the output of common commands) holdback replaces 2 values per 100 KB on the corpus the rules were
+tuned on and 3 on one they were not, whose command output changes from run to run. No planted value leaks from
+either corpus.
 
 **Real sessions.** Claude Code runs headless on copies of nine public Rust crates, five checkable tasks each, with
 the requests recorded on their way to the provider. With hook mode on, Haiku 5.5, Sonnet 5.5 and Opus 5.5 pass 45 of

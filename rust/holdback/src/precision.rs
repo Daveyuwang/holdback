@@ -118,6 +118,14 @@ static CONFIG_SECRET: LazyLock<Regex> =
     LazyLock::new(|| re(&format!(r#"(?im)^\s*(?:export\s+)?(?:"?{SECRET_KEY_NAME}"?)\s*[:=]\s*["']?([^"'\s#,]{{6,}})"#)));
 static JSON_SECRET: LazyLock<Regex> = LazyLock::new(|| re(&format!(r#"(?i)"{SECRET_KEY_NAME}"\s*:\s*"([^"]{{6,}})""#)));
 static PATH_USER: LazyLock<Regex> = LazyLock::new(|| re(r#"(?:/Users/|/home/|C:\\Users\\)([^/\\\s"']+)"#));
+/// The owner column of `ls -l`, also with sizes as `ls -lh` writes them.
+static LS_OWNER: LazyLock<Regex> = LazyLock::new(|| re(r"(?m)^[dlcbps-][rwxsStT-]{9}[@+.]?\s+\d+\s+(\S+)\s+\S+\s+\d[\d.,]*[BKMGTPE]?\s"));
+/// An account of the system or of a build machine, not of a person: `root`, `_spotlight`, a numeric id.
+fn system_account(name: &str) -> bool {
+    ["Shared", "runner", "user", "ubuntu", "root", "daemon", "nobody", "www-data"].contains(&name)
+        || name.starts_with('_')
+        || name.chars().all(|c| c.is_ascii_digit())
+}
 static URL: LazyLock<Regex> = LazyLock::new(|| re(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+"#));
 static FILE_PATH: LazyLock<Regex> = LazyLock::new(|| re(r#"(?<![\w:/.])~?/(?!/)[^\s"'`<>:]+|\b[A-Za-z]:\\[^\s"'`<>]+"#));
 /// Field names sit where values sit, so the detector sometimes tags them. They are never private values.
@@ -194,10 +202,13 @@ fn rule_spans(text: &str) -> Vec<Span> {
     for rx in [&*QUERY_SECRET, &*CONFIG_SECRET, &*JSON_SECRET] {
         group_spans(rx, text, 1, "secret", &mut out);
     }
-    for c in PATH_USER.captures_iter(text).flatten() {
-        let m = c.get(1).unwrap();
-        if !["Shared", "runner", "user", "ubuntu", "root"].contains(&m.as_str()) {
-            out.push(Span { start: m.start(), end: m.end(), label: "private_person".into() });
+    // a login name, in a home folder or as the owner in `ls -l`, which the detector finds in some listings only
+    for rx in [&*PATH_USER, &*LS_OWNER] {
+        for c in rx.captures_iter(text).flatten() {
+            let m = c.get(1).unwrap();
+            if !system_account(m.as_str()) {
+                out.push(Span { start: m.start(), end: m.end(), label: "private_person".into() });
+            }
         }
     }
     group_spans(&ZH_SPEAKER, text, 1, "private_person", &mut out);
@@ -457,6 +468,9 @@ mod tests {
         assert!(replaced("cd /home/jsmith/src/app", "jsmith", "private_person"));
         assert!(replaced("mail is in /var/mail/jsmith", "jsmith", "private_person"));
         assert!(replaced("cd /usr/home/jsmith/src", "jsmith", "private_person"));
+        let listing = "drwxr-xr-x  5 jsmith  staff   160B Nov 20 06:35 .\n-rw-r--r--  1 root  wheel    77 Nov 12 08:00 hosts\n-rw-------  1 _spotlight  staff  1.2K Nov 2 09:12 db\n-rw-r--r--  1 501  20  12 Nov 2 09:12 x";
+        let owners: Vec<&str> = super::refine(listing, &[]).iter().map(|s| &listing[s.start..s.end]).collect();
+        assert_eq!(owners, ["jsmith"]);
         assert!(!replaced("\"installed_time\": 1794938741,", "1794938741", "private_phone"));
         assert!(replaced("\"phone\": 13800138000,", "13800138000", "private_phone"));
         let sri = "\"integrity\": \"sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==\",";

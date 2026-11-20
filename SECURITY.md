@@ -9,8 +9,8 @@ private vulnerability reporting on this repository ("Report a vulnerability" und
 open a public issue for these.
 
 Include the holdback version (`holdback --version`), the mode (proxy or hook), the agent and its version, and
-the smallest input that shows the problem. Use made-up values. `holdback review --masked` output is safe to
-attach.
+the smallest input that shows the problem. Use made-up values. `holdback review --masked` output and, in hook
+mode, the lines of `sightings.log` hold only shapes and are safe to attach.
 
 ## What counts
 

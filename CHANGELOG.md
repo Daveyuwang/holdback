@@ -6,6 +6,8 @@
   options and the header of a CSV file. A placeholder no longer takes a line break with it, so a CSV row is no
   longer merged into the header above it.
 - A placeholder that a model writes without its brackets, such as `PRIVATE_PERSON_1`, is restored too.
+- The owner of a file in `ls -l` output is replaced, as the user name in a home folder is. The distilled model
+  found it in some listings only. System accounts such as `root` stay.
 
 ## 0.2.0
 

@@ -1,0 +1,53 @@
+name: Wrong replacement
+description: holdback replaced something that is not private, and the agent needed it.
+labels: [wrong replacement]
+body:
+  - type: markdown
+    attributes:
+      value: Use made-up values of the same shape. Do not paste real names, emails, keys or file contents.
+  - type: input
+    id: version
+    attributes:
+      label: holdback version
+      description: The output of `holdback --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Proxy (holdback run or holdback serve)
+        - Hook mode
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and model
+      placeholder: Claude Code 2.x with Sonnet 5.5
+  - type: textarea
+    id: masked
+    attributes:
+      label: Masked output
+      description: >-
+        Proxy: the lines of `holdback review --masked`. Hook mode: the lines of
+        `~/.local/state/holdback/sightings.log`. Both hold the shape of each value and of the text around it,
+        not the values.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: What should have stayed
+      description: A made-up text of the same shape, which part holdback replaced, and what the agent needed it for.
+    validations:
+      required: true
+  - type: checkboxes
+    id: private
+    attributes:
+      label: Before you send
+      options:
+        - label: This report holds no real private value.
+          required: true

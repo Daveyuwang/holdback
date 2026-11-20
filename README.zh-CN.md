@@ -117,7 +117,7 @@ HOLDBACK_KEY_ENV=BAILIAN_API_KEY holdback run codex --upstream bailian -m qwen3.
 
 ## 处理规则
 
-- **替换**：人名、邮箱、电话、地址、账号和卡号、出生日期、密码、API 密钥和令牌，以及文件路径里的用户名。URL 和连接串里只替换密码、令牌或密钥那一段。
+- **替换**：人名、邮箱、电话、地址、账号和卡号、出生日期、密码、API 密钥和令牌，以及文件路径和 `ls -l` 列表里的用户名。URL 和连接串里只替换密码、令牌或密钥那一段。
 - **保留**：主机、端口、路径、日期、版本号、UUID、提交哈希、内网 IP、云服务区域、工单号和订单号，以及单独出现的数字，比如计数和进程号。agent 需要这些信息，它们也不指向具体的人。
 - **占位符稳定**：代理运行期间，同一个值始终对应同一个占位符。agent 每轮重发的历史因此完全相同，云端的提示缓存照常生效。
 - **一行系统提示**：告诉模型占位符代表真实值，要原样使用。有的模型仍会去掉方括号（写成 `PRIVATE_PERSON_1`），holdback 也会还原这种写法。
@@ -132,6 +132,10 @@ HOLDBACK_KEY_ENV=BAILIAN_API_KEY holdback run codex --upstream bailian -m qwen3.
 
 想纠正 holdback，用 `holdback keep VALUE` 让某个值不再被替换，用 `holdback replace VALUE` 让它替换检测模型漏掉的值，
 比如一个人名。两者都在下一个请求生效，记录在 `~/.config/holdback/lists.json`。
+
+遇到误替换或漏掉的值，欢迎[提 issue](https://github.com/Daveyuwang/holdback/issues/new/choose)，附上 `holdback review --masked` 的输出；
+钩子模式下附上 `~/.local/state/holdback/sightings.log` 里对应的几行，里面同样只有形状。如果是 holdback 检测到了却仍然发出去的值，
+那是安全问题，请按 [SECURITY.md](SECURITY.md) 私下报告。
 
 ## 已知局限
 
@@ -196,9 +200,9 @@ uv run python bench/task_eval.py --runs 1        # 五种条件下的任务成�
 | 调参语料，只用检测模型 | 12 | 39 个里 0 个 |
 | 调参语料，加上 holdback 的规则 | 2 | 39 个里 0 个 |
 | 留出语料，只用检测模型 | 31 | 45 个里 0 个 |
-| 留出语料，加上 holdback 的规则 | 2 | 45 个里 0 个 |
+| 留出语料，加上 holdback 的规则 | 3 | 45 个里 0 个 |
 
-规则是对着第一份语料调的。留出语料是三个 crate 的源码、一个 npm 锁文件和另一批命令的输出；只用蒸馏模型时，它会把 npm 锁文件里的完整性哈希当成密钥，规则会把这些哈希保留下来。换成 Privacy Filter，加上规则后每 100 KB 的误替换分别是 3 个和 0 个。
+规则是对着第一份语料调的。留出语料是三个 crate 的源码、一个 npm 锁文件和另一批命令的输出；只用蒸馏模型时，它会把 npm 锁文件里的完整性哈希当成密钥，规则会把这些哈希保留下来。换成 Privacy Filter，加上规则后每 100 KB 的误替换分别是 3 个和 0 个。命令输出因机器和运行时间而异，这几个数会有一两个的浮动。
 
 开发文本里也有真人的信息。`bench/dev_eval.py --authors` 统计 `bench/real_eval.py` 用到的九个 crate 的 `authors` 列表里有多少维护者信息被替换：14 个名字 holdback 替换了 12 个，12 个邮箱全部替换；换成 Privacy Filter 是 8 个名字和 11 个邮箱。两者都没替换的是一个单独的名（没有姓）和一个单词的用户名。其中四位维护者的信息也出现在蒸馏模型的训练文本里，来自他们维护的其他 crate；其余的它同样替换了。
 
