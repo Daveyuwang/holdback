@@ -29,8 +29,7 @@ What the release rests on:
    `HOLDBACK_STUDENT_DIR`. In the first measurements it missed 13% of the Chinese names in a news test set where
    the Privacy Filter missed 67%, though it takes more common words for names. It found secrets in code about as
    often and checked text 7 to 14 times faster on an Apple M5. Still to do: publish its training and evaluation
-   code, bring its memory on long input back down (0.1.1's window cuts raised the peak for 8,192 tokens from
-   about 110 to 165 MB), and decide whether it becomes the default.
+   code, and decide whether it becomes the default.
 2. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
 3. Homebrew and npm packages, when asked for.
 

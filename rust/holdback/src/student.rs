@@ -201,10 +201,13 @@ impl Bert {
         let rows: Vec<Vec<u32>> = windows.iter().map(|w| [&[cls][..], w, &[sep][..]].concat()).collect();
         let t: usize = rows.iter().map(Vec::len).sum();
         let Work { x, q, k, v, ctx, tmp, ff } = work;
-        for buf in [&mut *x, &mut *q, &mut *k, &mut *v, &mut *ctx, &mut *tmp] {
-            buf.resize(t * h, 0.0);
+        // Sized once for the largest call, so that the buffers never grow: windows vary in length, and growing the
+        // buffers call after call raised peak memory by about 50 MB on an 8,192-token input.
+        let most = GROUP * (BODY + 2);
+        for (buf, width) in [(&mut *x, h), (&mut *q, h), (&mut *k, h), (&mut *v, h), (&mut *ctx, h), (&mut *tmp, h), (&mut *ff, self.inter)] {
+            buf.reserve_exact((most * width).saturating_sub(buf.len()));
+            buf.resize(t * width, 0.0);
         }
-        ff.resize(t * self.inter, 0.0);
 
         let word = self.f32s("bert.embeddings.word_embeddings.weight")?;
         let (pos, kind) = (self.f32s("bert.embeddings.position_embeddings.weight")?, self.f32s("bert.embeddings.token_type_embeddings.weight")?);
