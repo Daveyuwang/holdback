@@ -282,7 +282,7 @@ maintainers' names and emails found in them.
 
 | Real sessions, 45 tasks | Passed, hook mode on | Passed, hook mode off | Planted secrets sent | Maintainers' details sent | Saved values that are wrong |
 | --- | --- | --- | --- | --- | --- |
-| Haiku 5.5 | 45 | 45 | 0 | 2 | 1 of 51 |
+| Haiku 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
 | Sonnet 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
 | Opus 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
 

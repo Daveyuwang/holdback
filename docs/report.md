@@ -141,7 +141,7 @@ tuned on and on one they were not. No planted value leaks from either corpus.
 
 **Real sessions.** Claude Code runs headless on copies of nine public Rust crates, five checkable tasks each, with
 the requests recorded on their way to the provider. With hook mode on, Haiku 5.5, Sonnet 5.5 and Opus 5.5 pass 45 of
-45 tasks, as with it off; no planted secret reaches the provider. Of the 46 to 51 values hook mode saves per model,
+45 tasks, as with it off; no planted secret reaches the provider. Of the 46 values hook mode saves per model,
 one is wrong, a model name taken for a secret.
 
 **Cost.** The proxy answers 0.03 seconds after it starts, idles at about 40 MB, adds about 15 ms to a request of 900

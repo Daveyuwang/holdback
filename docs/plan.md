@@ -37,7 +37,7 @@ No new features. Each step ends with a check that a reader can rerun or see.
 | --- | --- |
 | Rules for the wrong replacements seen in real sessions: a number standing alone (a count, a process id), shell syntax, a command-line option, a CSV header, a span across a line break | Real sessions save no counts; public sets and generated tasks leak no more than before; cases in `precision.rs` |
 | Task success rerun with the distilled model on DeepSeek, Claude Haiku and Qwen | holdback at 97% or more on each, in the README table |
-| A week of hook mode in daily work, then the values saved since a marker sorted by kind with `holdback review --masked` | At most 10% of them wrong |
+| A week of hook mode in daily work, then the shapes that `sightings.log` recorded since a marker, sorted by kind | At most 10% of them wrong |
 | A demo of 30 to 60 seconds at the top of the README | Shows a value replaced on the way out and restored in the answer |
 | A technical report: the placeholder design, the distillation, the runtime, the evaluation and where holdback loses | Linked from the README |
 | An announcement | Three reports from people outside the project: issues, questions or pull requests |
