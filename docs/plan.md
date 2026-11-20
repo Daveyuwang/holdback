@@ -29,24 +29,22 @@ What the release rests on:
 - The real-session benchmark is narrow: short tasks on Rust crates.
 - Codex is checked through an OpenAI-compatible provider, not with GPT models.
 
-## 0.3: evidence and presentation
+## Wrap-up
 
-No new features. Each step ends with a check that a reader can rerun or see.
+The rules for wrong replacements seen in real sessions, the demo, the technical report and the task-success rerun
+(100% on DeepSeek, Claude Haiku and Qwen) are done. This round of work ends when the steps below are. No new
+features; each step ends with a check that a reader can rerun or see.
 
 | Step | Done when |
 | --- | --- |
-| Rules for the wrong replacements seen in real sessions: a number standing alone (a count, a process id), shell syntax, a command-line option, a CSV header, a span across a line break | Real sessions save no counts; public sets and generated tasks leak no more than before; cases in `precision.rs` |
-| Task success rerun with the distilled model on DeepSeek, Claude Haiku and Qwen | holdback at 97% or more on each, in the README table |
-| A week of hook mode in daily work, then the shapes that `sightings.log` recorded since a marker, sorted by kind | At most 10% of them wrong |
-| A demo of 30 to 60 seconds at the top of the README | Shows a value replaced on the way out and restored in the answer |
-| A technical report: the placeholder design, the distillation, the runtime, the evaluation and where holdback loses | Linked from the README |
-| An announcement | Three reports from people outside the project: issues, questions or pull requests |
+| The owner column of `ls -l`: the distilled model replaces a login name there in some listings and keeps it in others | Replaced in every line unless it is a system account; cases in `precision.rs`; benchmarks no worse |
+| 0.2.1 with the fixes since 0.2.0 | Released; the install script installs it on clean machines; real sessions pass on Haiku, Sonnet and Opus |
+| An issue form for a wrong replacement and for a missed value | A report needs the version, the mode and masked output, nothing private |
+| Real use: hook mode in the maintainer's daily work, on 0.2.1, for at least three working days and 200 new values, read from the shapes in `sightings.log` | At most 10% of the saved values wrong; the counts in the README. Above 10%, the largest kinds get rules and a 0.2.2 |
+| An announcement in two or more communities | Posted; each report answered within two days; what came in recorded here two weeks later |
 
-Done: the rules, the demo, the report and the task-success rerun (100% on all three models). Open: the week of
-real use and the announcement.
-
-After 0.3, as reports ask for them: widen the real-session benchmark (other languages, larger tool output, more
-kinds of tools); at the next retrain, label the developer text with the teacher's person and email spans as well as
-`people()`'s; Homebrew and npm packages.
+After that holdback takes bug fixes from reports. Waiting until someone asks: a wider real-session benchmark
+(other languages, larger tool output, more kinds of tools); training data for French, German, Italian, Spanish and
+Dutch; the teacher's person and email spans on developer text at the next retrain; Homebrew and npm packages.
 
 Reports of wrong replacements are welcome. `holdback review --masked` output is safe to attach to an issue.
