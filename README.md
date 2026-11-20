@@ -10,7 +10,7 @@ and your files keep the real values.
 It runs in two ways. As a local proxy it redacts every request, for Claude Code started from a terminal, Codex
 and any client that speaks the Anthropic Messages, OpenAI Chat Completions or OpenAI Responses API. As hooks
 inside Claude Code it redacts what tools return, for sessions that cannot go through a proxy, such as the
-Claude desktop app. [Hook mode](#hook-mode-for-the-desktop-app) lists what it does not cover. Version 0.1.
+Claude desktop app. [Hook mode](#hook-mode-for-the-desktop-app) lists what it does not cover. Version 0.2.
 
 ## What it looks like
 
@@ -41,7 +41,9 @@ non-private value next to a private one: a port in a connection string, a date i
 path. On DeepSeek, Claude Haiku and Qwen, task success was 99.5 to 100% with raw text. Replacing what the
 detector found with `<REDACTED>` dropped it to 56 to 57%. Numbered placeholders restored in the reply raised it
 to 72 to 86%. With holdback's rules, which keep hosts, ports, paths, dates and IDs and replace only the secret
-part, it reached 98 to 100%. [Benchmark](#benchmark) has the full tables and the commands to rerun them.
+part, it reached 98 to 100%. These runs used the Privacy Filter, holdback's detector before version 0.2; the
+distilled model that replaced it changes the same share of needed values on these tasks. [Benchmark](#benchmark)
+has the full tables and the commands to rerun them.
 
 ## Install
 
@@ -59,7 +61,7 @@ Code session, in [hook mode](#hook-mode-for-the-desktop-app). With `--proxy` it 
 from a terminal through the proxy, which covers more. It saves a copy of your settings file first and prints
 how to undo the change.
 
-Both commands finish in about a second. The first session then downloads the model, about 0.9 GB.
+Both commands finish in about a second. The first session then downloads the model, about 115 MB.
 `holdback doctor` checks the installation and names the fix for anything that is wrong.
 `sh install.sh --uninstall` removes the binary.
 
@@ -69,20 +71,20 @@ To build from source instead, with Rust 1.88 or later:
 cargo install --git https://github.com/Daveyuwang/holdback holdback
 ```
 
-The first start downloads the
-[OpenAI Privacy Filter](https://github.com/openai/privacy-filter) model in its 4-bit ONNX form (about 0.9 GB,
-Apache-2.0) to `~/.cache/holdback`. holdback runs the model with its own code instead of ONNX Runtime: it maps
-the weight file into memory instead of copying it, and each token reads only the 4 of the model's 128 expert
-blocks that it uses. The proxy starts in about 0.1 seconds, uses about 50 MB of memory when idle and about
-100 MB while working, and adds about 35 ms to a typical request. The mapped model file counts as file cache,
-which the system can reclaim. On macOS the matrix math runs on Apple's Accelerate; elsewhere a portable Rust
-library does it, which on the same Mac was 2.4 times slower on long inputs. Homebrew and npm packages are
-planned.
+The first start downloads holdback's detector to `~/.cache/holdback`: a model of 28M parameters distilled from
+OpenAI's [Privacy Filter](https://github.com/openai/privacy-filter) (about 115 MB, Apache-2.0,
+[model card](https://huggingface.co/limbo23/holdback-student)). Each file is kept only if its SHA-256 matches;
+`HF_ENDPOINT` sends the download to a Hugging Face mirror. holdback runs the model with its own code and maps the
+weight file into memory instead of copying it. The proxy answers about 0.05 seconds after it starts, uses about
+45 MB of memory when idle and about 120 MB after long inputs, and adds about 15 ms to a request of 900 characters
+(`bench/speed.py`). The mapped model file counts as file cache, which the system can reclaim. On macOS the matrix
+math runs on Apple's Accelerate; elsewhere a portable Rust library does it, which on the same Mac was about 2.5
+times slower. Homebrew and npm packages are planned.
 
-An experimental distilled detector can replace the Privacy Filter. It is smaller and faster and finds more
-Chinese names, but it is not the default yet. Download it from
-[Hugging Face](https://huggingface.co/limbo23/holdback-student) and point `HOLDBACK_STUDENT_DIR` at its folder;
-the model card has the commands and the measurements, and [distill/](distill/README.md) the code that trains it.
+`HOLDBACK_DETECTOR=privacy-filter` runs the Privacy Filter itself instead, in its 4-bit ONNX form (about 0.9 GB).
+It misses fewer values in French, German, Italian, Spanish and Dutch text. The distilled model misses far fewer in
+English and Chinese, and a request takes it 5 to 7 times less time. [Benchmark](#benchmark) compares the two, and
+[distill/](distill/README.md) has the code that trains the distilled model.
 
 ## Claude Code
 
@@ -189,14 +191,21 @@ are stored in `~/.config/holdback/lists.json`.
 
 ## Limits
 
-- holdback misses 10 to 14% of labeled values on four public sets of personal data. On
-  [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) the misses are mostly Chinese personal
-  names. On the three English sets they are mostly city names, first names and street addresses.
-- On [CredData](https://github.com/Samsung/CredData), a set of secrets in source files, holdback misses 32%.
+- On four public sets of personal data holdback misses 0 to 5% of labeled values. Two of them,
+  [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) and Nemotron-PII, also gave rows to the
+  distilled model's training, so they are not held out for it. On the English rows of ai4privacy the misses are
+  mostly cities, postcodes, user names and dates of birth.
+- In French, German, Italian, Spanish and Dutch the distilled model misses more than the Privacy Filter: 11 to 18%
+  of labeled values against 5 to 16%, mostly dates of birth, building numbers, postcodes and ID numbers (100 rows
+  of ai4privacy per language, `distill/heldout.py`). For such text, set `HOLDBACK_DETECTOR=privacy-filter`. Other
+  scripts, such as Korean, Arabic or Hindi, are untested.
+- In Chinese text the distilled model sometimes takes a common word for a name: 2.5% of the other characters in
+  news text, against 0.6% for the Privacy Filter (`distill/heldout.py`).
+- On [CredData](https://github.com/Samsung/CredData), a set of secrets in source files, holdback misses 30%.
   More than half of those are UUIDs, which holdback keeps because agents use them as identifiers.
-- A long input is slow the first time it is sent: a 48,000-character file adds about 3.5 seconds
-  on an Apple silicon Mac. Later requests reuse the result, and a text that differs a little from an earlier
-  one, such as a file after an edit, costs only its changed parts: about 0.1 seconds for a 13 KB file.
+- A long input takes longest the first time it is sent: a 48,000-character file adds about 0.4 seconds on an
+  Apple silicon Mac. Later requests reuse the result, and a text that differs a little from an earlier one, such
+  as a file after an edit, costs only its changed parts: about 40 ms for a 13 KB file.
 - Names of public figures are sometimes replaced.
 - Text-level redaction cannot see data that an agent encodes itself. In testing, one model printed a file with
   `od` to read a password around the redaction. The system line now forbids this, but holdback does not enforce
@@ -217,17 +226,20 @@ are stored in `~/.config/holdback/lists.json`.
 | `rust/holdback` | The proxy and command-line tool |
 | `plugins/claude-code` | Claude Code plugin |
 | `bench` | Task generator, benchmarks and real-agent checks; they call the `holdback` binary |
+| `distill` | Training data, training and extra test sets for the distilled model |
 
 ## Benchmark
 
-Build the binary first (`cargo build --release` in `rust/holdback`). The first two scripts run locally; the
-third calls model APIs and needs `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `BAILIAN_API_KEY` and
+Build the binary first (`cargo build --release` in `rust/holdback`). The scripts use the default detector; with
+`HOLDBACK_DETECTOR=privacy-filter` they use the Privacy Filter and cache its results apart. All but `task_eval.py`
+run locally; it calls model APIs and needs `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `BAILIAN_API_KEY` and
 `BAILIAN_BASE_URL`.
 
 ```bash
 uv run python bench/detect_eval.py [--seed 11]   # generated agent-style text
 uv run python bench/public_eval.py               # public labeled sets
 uv run python bench/dev_eval.py [--held-out]     # developer output with nothing private in it
+uv run python bench/speed.py                     # the proxy's start time, memory and time added per request
 uv run python bench/task_eval.py --runs 1        # task success under five conditions
 ```
 
@@ -236,11 +248,15 @@ uv run python bench/task_eval.py --runs 1        # task success under five condi
 
 | Detection on generated text | Private values leaked (of 288) | Needed values replaced (of 186) |
 | --- | --- | --- |
-| Privacy Filter alone | 5.6% | 45.7% |
-| Privacy Filter plus holdback's rules | 0.3% | 3.2% |
+| Distilled model alone | 8.0% | 25.3% |
+| Distilled model plus holdback's rules | 0.0% | 3.2% |
 | Same, fresh instances (`--seed 11`) | 0.0% | 3.2% |
+| Privacy Filter plus holdback's rules | 0.3% | 3.2% |
 
-| Task success, one run | Raw | `<REDACTED>` | Placeholders | holdback | Only true secrets replaced |
+The task runs below used the Privacy Filter, the default detector before version 0.2. They have not been
+repeated with the distilled model, which replaces the same share of needed values on these tasks.
+
+| Task success, one run, with the Privacy Filter | Raw | `<REDACTED>` | Placeholders | holdback | Only true secrets replaced |
 | --- | --- | --- | --- | --- | --- |
 | DeepSeek (deepseek-flash) | 100.0% | 55.9% | 71.5% | 99.5% | 99.5% |
 | Claude (claude-haiku-5-5) | 99.5% | 57.0% | 85.5% | 100.0% | 100.0% |
@@ -256,13 +272,14 @@ commands), with made-up names, emails and keys planted at known places.
 
 | Developer output | False replacements per 100 KB | Planted values leaked |
 | --- | --- | --- |
-| Tuning corpus, detector alone | 36 | 0 of 39 |
+| Tuning corpus, detector alone | 16 | 0 of 39 |
 | Tuning corpus, with holdback's rules | 4 | 0 of 39 |
-| Held-out corpus, detector alone | 4 | 2 of 45 |
-| Held-out corpus, with holdback's rules | 0 | 0 of 45 |
+| Held-out corpus, detector alone | 31 | 0 of 45 |
+| Held-out corpus, with holdback's rules | 2 | 0 of 45 |
 
-The rules were tuned on the first corpus, where lockfile checksums made up half of the false replacements. The
-held-out corpus is the source of three crates, an npm lockfile and other commands.
+The rules were tuned on the first corpus. The held-out corpus is the source of three crates, an npm lockfile and
+other commands; the distilled model alone takes the npm lockfile's integrity hashes for secrets, and the rules
+keep them. With the Privacy Filter the rules leave 4 and 0 false replacements per 100 KB.
 
 `bench/real_eval.py` runs real agent sessions: Claude Code, headless, on copies of nine public crates, five
 tasks each, with hook mode on and with it off. Every task has a check a program can verify, such as writing
@@ -271,13 +288,14 @@ password. Requests are recorded on their way to the provider.
 
 | Real sessions, 45 tasks | Passed, hook mode on | Passed, hook mode off | Planted values sent | Saved values that are wrong |
 | --- | --- | --- | --- | --- |
-| Haiku 5.5 | 45 | 45 | 0 | 0 of 43 |
-| Sonnet 5.5 | 44 | 45 | 0 | 0 of 43 |
-| Opus 5.5 | 45 | 45 | 0 | 0 of 43 |
+| Haiku 5.5 | 45 | 45 | 0 | 1 of 44 |
+| Sonnet 5.5 | 44 | 45 | 0 | 1 of 44 |
+| Opus 5.5 | 45 | 45 | 0 | 1 of 44 |
 
-A task took 4 to 7 seconds with hook mode on or off. These tasks are short, about 1 KB per tool result, and
-all in Rust crates. The rules were tuned on this harness: its first run had 16% wrong values, a database host
-and a file name among them.
+A task took 3 to 7 seconds with hook mode on or off. Sonnet's failed task was a build that could not resolve a
+dependency offline. The wrong value, the same on every model, is a test string in tiktoken-rs taken for a secret.
+These tasks are short, about 1 KB per tool result, and all in Rust crates. The rules were tuned on this harness:
+its first run had 16% wrong values, a database host and a file name among them.
 
 `bench/check_proxy.py` and `bench/check_agents.py` run real SDK clients, Claude Code and Codex through a running
 proxy and check that no private value reached the upstream. `bench/check_hooks.py` does the same for hook mode.
@@ -315,9 +333,13 @@ their own, such as dates, occupation, country and organization, are not counted.
 | Codex patterns | 91.7%, 0.0% | 100.0%, 0.0% | 99.9%, 0.0% | 99.8%, 0.0% | 100.0%, 0.0% | 93.1%, 0.2% |
 | Presidio | 38.9%, 60.8% | 66.1%, 10.3% | 32.6%, 9.8% | 19.5%, 1.1% | 8.1%, 4.5% | 83.5%, 11.6% |
 | rehydra | 16.7%, 39.2% | 50.8%, 6.6% | 38.4%, 7.8% | 31.2%, 0.3% | 19.3%, 0.6% | 77.4%, 5.4% |
-| holdback | 0.3%, 3.2% | 14.4%, 17.5% | 12.7%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
+| holdback | 0.0%, 3.2% | 0.0%, 18.2% | 5.4%, 11.2% | 1.6%, 0.2% | 0.6%, 0.5% | 29.9%, 8.2% |
+| holdback with the Privacy Filter | 0.3%, 3.2% | 14.4%, 17.5% | 12.7%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
 
-| Task success, one run, 186 tasks | Raw | Codex patterns | Presidio | rehydra | holdback |
+PII Bench ZH and Nemotron-PII gave other rows to the distilled model's training, so those two columns are not
+held out for it.
+
+| Task success, one run, 186 tasks | Raw | Codex patterns | Presidio | rehydra | holdback with the Privacy Filter |
 | --- | --- | --- | --- | --- | --- |
 | DeepSeek (deepseek-flash) | 100.0% | 99.5% | 41.9% | 68.3% | 99.5% |
 | Claude (claude-haiku-5-5) | 99.5% | 99.5% | 44.1% | 84.4% | 100.0% |
@@ -325,13 +347,12 @@ their own, such as dates, occupation, country and organization, are not counted.
 
 The Codex patterns keep tasks working because they leave 92% of the private values in place. Presidio and
 rehydra replace whole connection strings, URLs and dates, which removes the port, path or date a task needs.
-holdback replaces more non-private characters than the others on the Chinese set. On PrivacyBench, which is
-workplace email and chat, Presidio leaks less than holdback and replaces more ordinary text. On ai4privacy and
+holdback replaces more non-private characters than the others on the Chinese set. On ai4privacy and
 Nemotron-PII, holdback's rules keep some dates of birth and ID numbers that the detector alone would replace,
 which raises its leak rate by one to two points. The rule that recognizes a date of birth was widened after the
-first Nemotron-PII run, where holdback leaked 14.6%.
+first Nemotron-PII run, where holdback with the Privacy Filter leaked 14.6%.
 
-On CredData the detector alone leaks 15.9%. holdback's rules raise that to 32.4%, mostly by keeping UUIDs. The
+On CredData the distilled model alone leaks 24.8%. holdback's rules raise that to 29.9%, mostly by keeping UUIDs. The
 rule that keeps commit hashes and UUIDs was narrowed after the first CredData run, where holdback leaked 42.9%:
 a hex string or UUID assigned to a name such as `secret` or `token` is now replaced.
 

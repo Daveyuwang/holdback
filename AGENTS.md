@@ -10,8 +10,8 @@ file covers how to work on the code.
 | --- | --- |
 | `rust/holdback/src/main.rs` | CLI: `serve`, `run claude\|codex`, `status`, `review`, `keep`, `replace`, `hook`, `setup`, `doctor`, `spans <json>`; model download |
 | `rust/holdback/src/native.rs` | The Privacy Filter runtime: memory-mapped q4 weights, Accelerate on macOS, `gemm` elsewhere |
-| `rust/holdback/src/detect.rs` | Tokenizing, 128-token windows that end at a line break, separator or space where they can, Viterbi decoding into spans; `Detector` picks the Privacy Filter or the student |
-| `rust/holdback/src/student.rs` | The distilled student: a 6-layer BERT encoder run from its memory-mapped safetensors file, its own tokenizer, 254-token windows, BIO labels into spans |
+| `rust/holdback/src/detect.rs` | The Privacy Filter's tokenizing, 128-token windows that end at a line break, separator or space where they can, Viterbi decoding into spans; `Detector` is either detector |
+| `rust/holdback/src/student.rs` | The distilled model, the default detector: a 6-layer BERT encoder run from its memory-mapped safetensors file, its own tokenizer, 254-token windows, BIO labels into spans |
 | `rust/holdback/src/precision.rs` | Rules that keep hosts, ports, paths, dates and IDs and replace only the secret part |
 | `rust/holdback/src/vault.rs` | Placeholder assignment, the known-values pass, the user's keep and replace lists, restore, the saved map for hook mode |
 | `rust/holdback/src/hooks.rs` | Hook mode: Claude Code hook events in, hook answers out |
@@ -34,8 +34,11 @@ cargo build --release
 cargo test --release
 ```
 
-The first run downloads the model (about 0.9 GB) to `~/.cache/holdback/privacy-filter-q4`, or to
-`HOLDBACK_MODEL_DIR`. CI runs the same steps on Linux on every push. The release workflow builds all four targets and checks macOS
+The tests run both detectors, so download both once: `holdback serve` fetches the distilled model (about 115 MB)
+to `~/.cache/holdback/holdback-student`, and `HOLDBACK_DETECTOR=privacy-filter holdback serve` the Privacy Filter
+(about 0.9 GB) to `~/.cache/holdback/privacy-filter-q4`. `main.rs` pins both models' revisions and SHA-256 sums;
+a new published model means new pins there and a new fixture from `distill/fixture.py`. CI runs the same steps on
+Linux on every push. The release workflow builds all four targets and checks macOS
 and Linux on clean runners; it runs on a tag and on request, because macOS minutes cost more. Check macOS
 locally before a normal push.
 
@@ -54,9 +57,9 @@ locally before a normal push.
   byte-identical and prompt caching keeps working.
 - **Thinking blocks pass through untouched.** Providers sign them.
 - **Runtime parity.** `native::tests::matches_onnx_runtime` compares logits with ONNX Runtime's reference output
-  in `src/testdata/logits.json`, and `student::tests::matches_pytorch` compares the student's with PyTorch's in
-  `src/testdata/student_logits.json`. A runtime change that fails them changes model output; do not loosen the
-  tolerance to make them pass.
+  in `src/testdata/logits.json`, and `student::tests::matches_pytorch` compares the distilled model's with
+  PyTorch's in `src/testdata/student_logits.json`. A runtime change that fails them changes model output; do not
+  loosen the tolerance to make them pass.
 - **Tests use synthetic values.** No real names, emails or keys in code, tests or fixtures.
 
 ## Checking a change
@@ -66,9 +69,9 @@ Run the checks that cover what changed.
 | Change | Checks |
 | --- | --- |
 | `native.rs`, `detect.rs` | `cargo test`; a runtime change must not move benchmark numbers, a change to the windows is checked like a rule change |
-| `student.rs` | `HOLDBACK_STUDENT_DIR=<model dir> cargo test --release` (the logits test is skipped without it), then the benchmarks with the variable set |
-| `distill/` | Rebuild the data and train; then the benchmarks with `HOLDBACK_STUDENT_DIR` and `distill/heldout.py`, against the model card's numbers |
-| `precision.rs` | `bench/detect_eval.py` (also `--seed 11`), `bench/public_eval.py` and `bench/dev_eval.py` (also `--held-out`) |
+| `student.rs` | `cargo test --release`, then the benchmarks |
+| `distill/` | Rebuild the data and train; then the benchmarks with `HOLDBACK_STUDENT_DIR` set to the new model and `distill/heldout.py`, against the model card's numbers |
+| `precision.rs` | `bench/detect_eval.py` (also `--seed 11`), `bench/public_eval.py` and `bench/dev_eval.py` (also `--held-out`), for the default detector and with `HOLDBACK_DETECTOR=privacy-filter` |
 | `vault.rs`, the known-values pass | `bench/public_eval.py --sequence`, which runs each set through one map in order |
 | `protocols.rs`, `server.rs` | `bench/check_proxy.py`, then `bench/check_agents.py` with Claude Code and Codex |
 | `hooks.rs`, the plugin's hooks | `bench/check_hooks.py` and `bench/real_eval.py`, on more than one model |
@@ -85,8 +88,8 @@ uv run python bench/task_eval.py --runs 1          # calls model APIs
 `check_proxy.py` and `check_agents.py` need a running proxy with `HOLDBACK_DUMP` set; each docstring has the
 command. The bench scripts run the release binary, so run `cargo build --release` after a change; `cargo test` does not
 rebuild it. Results go to `bench/results/`, which is ignored by git. Span results are cached there by name, so delete the
-holdback span files (`spans_seed*.json`, `dev*_spans.json`, `*_spans_400.json` without a tool prefix, and their `student_` copies, which the
-distilled model writes) after changing a rule. The rules were tuned on the generated tasks, so
+holdback span files (`spans_seed*.json`, `dev*_spans.json`, `*_spans_400.json` without a tool prefix, and their
+`privacy_filter_` and `student_` copies, which the other detectors write) after changing a rule. The rules were tuned on the generated tasks, so
 the public sets are the held-out check: report both.
 
 ## Configuration
@@ -96,8 +99,10 @@ the public sets are the held-out check: report both.
 | `HOLDBACK_PORT` | Proxy port, default 8787 |
 | `HOLDBACK_UPSTREAMS` | Extra upstreams, `name=https://host/base,other=...` |
 | `HOLDBACK_KEY_ENV` | Variable that holds the upstream key for `run codex`, default `OPENAI_API_KEY` |
-| `HOLDBACK_MODEL_DIR` | Model directory instead of the cache |
-| `HOLDBACK_STUDENT_DIR` | Use the distilled student instead of the Privacy Filter: a directory with `config.json`, `model.safetensors` (f32) and `tokenizer.json`. Experimental; the model is [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student) on Hugging Face, its training code is in `distill/` |
+| `HOLDBACK_DETECTOR` | `distilled` (default) or `privacy-filter` |
+| `HOLDBACK_STUDENT_DIR` | The distilled model's directory instead of the cache: `config.json`, `model.safetensors` (f32) and `tokenizer.json`. The published model is [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student); `distill/` trains it |
+| `HOLDBACK_MODEL_DIR` | The Privacy Filter's directory instead of the cache |
+| `HF_ENDPOINT` | A Hugging Face mirror to download the models from |
 | `HOLDBACK_DUMP` | Append each redacted upstream request to this file, for the checks |
 | `HOLDBACK_HOOKS` | `1` switches hook mode on for sessions that are not routed through the proxy |
 | `HOLDBACK_STATE_DIR` | Where hook mode saves its placeholder map, default `~/.local/state/holdback` |

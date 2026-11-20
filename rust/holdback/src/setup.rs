@@ -57,18 +57,12 @@ pub async fn doctor(port: u16) -> Result<()> {
         false => say("FIX", format!("the holdback command is not on PATH: add {} to PATH in your shell profile", exe.parent().unwrap().display())),
     }
 
-    if let Ok(dir) = std::env::var("HOLDBACK_STUDENT_DIR") {
-        let missing: Vec<&str> = ["config.json", "model.safetensors", "tokenizer.json"].into_iter().filter(|f| !std::path::Path::new(&dir).join(f).exists()).collect();
-        match missing.is_empty() {
-            true => say("ok", format!("HOLDBACK_STUDENT_DIR: the distilled model is in {dir}")),
-            false => say("FIX", format!("HOLDBACK_STUDENT_DIR points at {dir}, which has no {}", missing.join(", "))),
-        }
-    } else {
-        let model = crate::model_dir();
-        match crate::MODEL_FILES.iter().all(|f| model.join(f).exists()) {
-            true => say("ok", format!("the privacy model is in {}", model.display())),
-            false => say("note", "the privacy model is not downloaded yet; the first start downloads about 0.9 GB".into()),
-        }
+    match crate::chosen() {
+        Err(e) => say("FIX", format!("{e}")),
+        Ok(model) => match model.missing().is_empty() {
+            true => say("ok", format!("the {} detector is in {}", model.name, model.dir().display())),
+            false => say("note", format!("the {} detector is not downloaded yet; the first start downloads {} to {}", model.name, model.size, model.dir().display())),
+        },
     }
 
     let status = crate::ask(port, "status").await;

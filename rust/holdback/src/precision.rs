@@ -400,11 +400,17 @@ mod tests {
         assert!(replaced("see https://internal.example.com/reset?token=abc123def456", "https://internal.example.com/reset?token=abc123def456", "private_url"));
     }
 
-    /// Cases from real agent traffic, run through the real detector: each value in `kept` must survive and each
-    /// value in `replaced` must go.
+    /// Both detectors, each downloaded by one start of holdback with HOLDBACK_DETECTOR set to its name.
+    fn detectors() -> Vec<crate::detect::Detector> {
+        let filter = crate::detect::Detector::load(&crate::PRIVACY_FILTER.dir()).expect("run `HOLDBACK_DETECTOR=privacy-filter holdback serve` once to download the Privacy Filter");
+        let distilled = crate::student::Student::load(&crate::DISTILLED.dir()).expect("run `holdback serve` once to download the distilled model");
+        vec![filter, crate::detect::Detector::Student(Box::new(distilled))]
+    }
+
+    /// Cases from real agent traffic, run through both detectors: each value in `kept` must survive and each value
+    /// in `replaced` must go.
     #[test]
     fn keeps_what_an_agent_needs() {
-        let mut detector = crate::detect::Detector::load(&crate::model_dir()).expect("no model; run `holdback serve` once to download it");
         let cases: &[(&str, &[&str], &[&str])] = &[
             (
                 "- acme-tools:code-review: Review a change.\n- acme-tools:oss-ideas: Find a project idea.\n- yu-skills:clear-writing: Write emails in Yu's style.",
@@ -455,26 +461,27 @@ mod tests {
         // as it gets from a detector that has seen nothing
         let base: String = (0..400).map(|i| format!("line {i}: Maria Gonzalez wrote to dokafor88@outlook.com about order {i}\n")).collect();
         let edited = base.replacen("line 200: Maria Gonzalez", "line 200: Daniel Okafor and Priya Raman", 1);
-        let mut fresh = crate::detect::Detector::load(&crate::model_dir()).unwrap();
-        detector.detect(&base).unwrap();
-        assert_eq!(detector.detect(&edited).unwrap(), fresh.detect(&edited).unwrap());
-        for (text, kept, replaced) in cases {
-            let spans = super::refine(text, &detector.detect(text).unwrap());
-            let hit = |v: &str| {
-                let at = text.find(v).unwrap();
-                spans.iter().any(|s| s.start < at + v.len() && at < s.end)
-            };
-            for v in *kept {
-                assert!(!hit(v), "{v:?} was replaced in {text:?}");
-            }
-            for v in *replaced {
-                assert!(hit(v), "{v:?} was kept in {text:?}");
+        for (mut detector, mut fresh) in detectors().into_iter().zip(detectors()) {
+            detector.detect(&base).unwrap();
+            assert_eq!(detector.detect(&edited).unwrap(), fresh.detect(&edited).unwrap());
+            for (text, kept, replaced) in cases {
+                let spans = super::refine(text, &detector.detect(text).unwrap());
+                let hit = |v: &str| {
+                    let at = text.find(v).unwrap();
+                    spans.iter().any(|s| s.start < at + v.len() && at < s.end)
+                };
+                for v in *kept {
+                    assert!(!hit(v), "{}: {v:?} was replaced in {text:?}", detector.name());
+                }
+                for v in *replaced {
+                    assert!(hit(v), "{}: {v:?} was kept in {text:?}", detector.name());
+                }
             }
         }
     }
 
     /// A one-line JSON response has no line break for a window to end at. No name or email in it may be cut in two
-    /// by a window edge and replaced only in part, by the Privacy Filter or, with HOLDBACK_STUDENT_DIR, the student.
+    /// by a window edge and replaced only in part, by either detector.
     #[test]
     fn keeps_values_whole_at_window_edges() {
         let (first, last) = (["Maria", "Daniel", "Priya", "Hannah", "Oliver", "Sofia", "Lucas", "Aisha"], ["Gonzalez", "Okafor", "Raman", "Becker", "Clarke", "Rossi", "Novak", "Dubois"]);
@@ -489,11 +496,7 @@ mod tests {
             })
             .collect();
         let text = format!(r#"{{"users":[{}],"next":null}}"#, records.join(","));
-        let mut detectors = vec![crate::detect::Detector::load(&crate::model_dir()).unwrap()];
-        if let Ok(dir) = std::env::var("HOLDBACK_STUDENT_DIR") {
-            detectors.push(crate::detect::Detector::Student(Box::new(crate::student::Student::load(std::path::Path::new(&dir)).unwrap())));
-        }
-        for mut detector in detectors {
+        for mut detector in detectors() {
             let spans = detector.detect(&text).unwrap();
             let (mut at, mut cut) = (0, vec![]);
             for v in &values {

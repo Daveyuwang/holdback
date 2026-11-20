@@ -857,6 +857,7 @@ name = "holdback"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "aws-lc-rs",
  "axum",
  "bytes",
  "fancy-regex 0.20.2",

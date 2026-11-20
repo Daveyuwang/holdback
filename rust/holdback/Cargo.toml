@@ -7,6 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1"
+aws-lc-rs = { version = "1.19", default-features = false }  # SHA-256 of model downloads; already built for TLS
 axum = "0.8.9"
 bytes = "1"
 fancy-regex = "0.20.2"

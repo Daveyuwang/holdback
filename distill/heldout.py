@@ -8,6 +8,8 @@ by holdback's rules, with holdback's metric code (bench/public_eval.py):
                 leak nor false positive. For evaluation only: the original release has no license that allows training
   requests      30 Chinese developer requests written for this check (zh_requests.json)
   requests_dev  20 more, written while fixing false positives, so a development set
+  european      100 validation rows in each of ai4privacy's languages other than English, scored per language; its
+                license allows academic and non-commercial use, so it is read for evaluation only, as in bench/
 
 The sets and the Privacy Filter's spans are cached in distill/data/.
 Usage: uv run --group distill python distill/heldout.py MODEL_DIR [SET ...]"""
@@ -28,6 +30,7 @@ DATA = HERE / "data"
 PERSONAS = ["elena_stripe", "grace_deere_company", "hannah_salesforce"]
 MSRA = ("PassbyGrocer/msra-ner", "01b2a657f0baa679c86154a3499706a069b73179")
 MSRA_TAGS = ["O", "B-LOC", "I-LOC", "B-ORG", "I-ORG", "B-PER", "I-PER"]
+AI4PRIVACY = ("ai4privacy/pii-masking-400k", "414d0a3b5798a152588a0828f1c08a5787de10f4")
 
 
 def personas():
@@ -87,20 +90,33 @@ def msra():
     return rows
 
 
+def european():
+    """The first 100 validation rows of each language other than English, with the language as a third field."""
+    from datasets import load_dataset
+    rows, count = [], {}
+    for r in load_dataset(AI4PRIVACY[0], split="validation", revision=AI4PRIVACY[1], streaming=True):
+        if r["language"] != "en" and count.get(r["language"], 0) < 100:
+            count[r["language"]] = count.get(r["language"], 0) + 1
+            rows.append([r["source_text"], entities(r["privacy_mask"], "label"), r["language"]])
+        if len(count) == 5 and min(count.values()) == 100:
+            return rows
+
+
 SETS = {
     "personas": ("PrivacyBench, three personas never trained on", personas),
     "creddata": ("CredData, credentials from files no earlier sample used", creddata),
     "msra": ("Chinese person names, MSRA NER test, odd rows", msra),
     "requests": ("Chinese developer requests", lambda: json.loads((HERE / "zh_requests.json").read_text())["fresh"]),
     "requests_dev": ("Chinese developer requests, development set", lambda: json.loads((HERE / "zh_requests.json").read_text())["dev"]),
+    "european": ("ai4privacy validation", european),
 }
 
 
 def holdback(texts: list[str], student: Path | None) -> list[dict]:
     """`holdback spans` with the Privacy Filter, or with the distilled model in `student`."""
-    env = {k: v for k, v in os.environ.items() if k != "HOLDBACK_STUDENT_DIR"}
+    env = {k: v for k, v in os.environ.items() if k != "HOLDBACK_STUDENT_DIR"} | {"HOLDBACK_DETECTOR": "privacy-filter"}
     if student:
-        env["HOLDBACK_STUDENT_DIR"] = str(student)
+        env |= {"HOLDBACK_DETECTOR": "distilled", "HOLDBACK_STUDENT_DIR": str(student)}
     with tempfile.TemporaryDirectory() as d:
         f = Path(d) / "texts.json"
         f.write_text(json.dumps({"texts": texts}))
@@ -126,14 +142,19 @@ def main():
             print(f"{title}: skipped, bench/results/CredData is not downloaded")
             continue
         rows = cached(key, build)
-        texts = [t for t, _ in rows]
+        texts = [r[0] for r in rows]
         teacher = cached(f"{key}_teacher", lambda: holdback(texts, None), texts)
         student = holdback(texts, model)
-        print(f"{title}, {len(rows)} rows")
-        evaluate(rows, [r["detected"] for r in teacher], "Privacy Filter")
-        evaluate(rows, [r["refined"] for r in teacher], " + holdback rules")
-        evaluate(rows, [r["detected"] for r in student], model.name)
-        evaluate(rows, [r["refined"] for r in student], " + holdback rules")
+        groups = {}  # the European set is scored per language
+        for i, r in enumerate(rows):
+            groups.setdefault(r[2] if len(r) > 2 else "", []).append(i)
+        for group, idx in groups.items():
+            part = [rows[i][:2] for i in idx]
+            print(f"{title}{', ' + group if group else ''}, {len(part)} rows")
+            evaluate(part, [teacher[i]["detected"] for i in idx], "Privacy Filter")
+            evaluate(part, [teacher[i]["refined"] for i in idx], " + holdback rules")
+            evaluate(part, [student[i]["detected"] for i in idx], model.name)
+            evaluate(part, [student[i]["refined"] for i in idx], " + holdback rules")
 
 
 if __name__ == "__main__":

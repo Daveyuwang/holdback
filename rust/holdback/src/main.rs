@@ -33,18 +33,78 @@ usage:
   holdback --version
 
 upstreams: anthropic, openai, deepseek, deepseek-anthropic, plus HOLDBACK_UPSTREAMS=\"name=https://host/base,...\"
-model: downloaded on first start to ~/.cache/holdback (about 0.9 GB); override with HOLDBACK_MODEL_DIR
+detector: holdback's distilled model (about 115 MB), downloaded on first start to ~/.cache/holdback;
+  HOLDBACK_DETECTOR=privacy-filter runs OpenAI's Privacy Filter instead (about 0.9 GB); HF_ENDPOINT picks a mirror
 hook mode: saves its placeholder map to ~/.local/state/holdback; override with HOLDBACK_STATE_DIR";
 
-const MODEL_REPO: &str = "https://huggingface.co/openai/privacy-filter/resolve/main";
-const MODEL_FILES: &[&str] = &["config.json", "onnx/model_q4.onnx", "onnx/model_q4.onnx_data"];
+/// A detector holdback can run, downloaded on first use from Hugging Face (or the mirror in HF_ENDPOINT) at a fixed
+/// revision, each file checked against its SHA-256.
+pub struct Model {
+    /// The value of HOLDBACK_DETECTOR that picks it.
+    pub name: &'static str,
+    pub title: &'static str,
+    repo: &'static str,
+    revision: &'static str,
+    files: &'static [(&'static str, &'static str)],
+    /// The variable that names another directory for it, and its directory under ~/.cache/holdback otherwise.
+    dir_var: &'static str,
+    cache: &'static str,
+    pub size: &'static str,
+}
 
-fn model_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("HOLDBACK_MODEL_DIR") {
-        return PathBuf::from(dir);
+pub static DISTILLED: Model = Model {
+    name: "distilled",
+    title: "holdback's distilled privacy model",
+    repo: "limbo23/holdback-student",
+    revision: "f1898f041baaea805f78a73d0de55eb3062f7c61",
+    files: &[
+        ("config.json", "cbf53393a8839374ce3944ae4ae1c43c0cb481fe24e449a80671ce3fd08c5429"),
+        ("model.safetensors", "ceb665f1b44316521792f73c1a677150f5ac96c3b43c34d0716e912f491a5711"),
+        ("tokenizer.json", "1e33a5df9f2b9ca818afbbce8dc1799b1d289080e30f3b6332a65bb2a2292f89"),
+    ],
+    dir_var: "HOLDBACK_STUDENT_DIR",
+    cache: "holdback-student",
+    size: "about 115 MB",
+};
+
+pub static PRIVACY_FILTER: Model = Model {
+    name: "privacy-filter",
+    title: "OpenAI Privacy Filter (q4)",
+    repo: "openai/privacy-filter",
+    revision: "7ffa9a043d54d1be65afb281eddf0ffbe629385b",
+    files: &[
+        ("config.json", "b2b26a4a4a000639ad30b0c264adbefe365bdb567fbd7bb27303b8c438375bd1"),
+        ("onnx/model_q4.onnx", "8f7dee8b46d096f052b359375dfba5d983cc4d18c44a783bf548615c472f8dea"),
+        ("onnx/model_q4.onnx_data", "f30998e28c71c5374cc7e8b7de8f0f83e981592c0c2d652d2ad4928454dbb496"),
+    ],
+    dir_var: "HOLDBACK_MODEL_DIR",
+    cache: "privacy-filter-q4",
+    size: "about 0.9 GB",
+};
+
+impl Model {
+    pub fn dir(&self) -> PathBuf {
+        if let Ok(dir) = std::env::var(self.dir_var) {
+            return PathBuf::from(dir);
+        }
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        Path::new(&home).join(".cache").join("holdback").join(self.cache)
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    Path::new(&home).join(".cache").join("holdback").join("privacy-filter-q4")
+
+    /// Its files that are not in its directory yet.
+    pub fn missing(&self) -> Vec<&'static str> {
+        let dir = self.dir();
+        self.files.iter().map(|(f, _)| *f).filter(|f| !dir.join(f).exists()).collect()
+    }
+}
+
+/// The detector HOLDBACK_DETECTOR names: the distilled model unless it says privacy-filter.
+pub fn chosen() -> Result<&'static Model> {
+    match std::env::var("HOLDBACK_DETECTOR").as_deref() {
+        Err(_) | Ok("") | Ok("distilled") => Ok(&DISTILLED),
+        Ok("privacy-filter") => Ok(&PRIVACY_FILTER),
+        Ok(other) => bail!("HOLDBACK_DETECTOR is {other:?}; use distilled or privacy-filter"),
+    }
 }
 
 /// Where hook mode saves the placeholder map.
@@ -85,21 +145,24 @@ fn correct(list: &str, values: &[String]) -> Result<()> {
     Ok(())
 }
 
-async fn ensure_model(dir: &Path) -> Result<()> {
+/// Downloads the model's missing files. A file is kept only when its SHA-256 matches.
+async fn ensure_model(model: &Model) -> Result<()> {
+    let dir = model.dir();
+    let host = std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".into());
     let client = reqwest::Client::new();
-    for file in MODEL_FILES {
+    for file in model.missing() {
         let target = dir.join(file);
-        if target.exists() {
-            continue;
-        }
         std::fs::create_dir_all(target.parent().unwrap())?;
-        let mut resp = client.get(format!("{MODEL_REPO}/{file}")).send().await?.error_for_status().with_context(|| format!("downloading {file}"))?;
+        let url = format!("{}/{}/resolve/{}/{file}", host.trim_end_matches('/'), model.repo, model.revision);
+        let mut resp = client.get(&url).send().await?.error_for_status().with_context(|| format!("downloading {url}"))?;
         let total = resp.content_length().unwrap_or(0);
-        let part = target.with_extension("part");
+        let part = target.with_file_name(format!("{}.part", target.file_name().unwrap().to_string_lossy()));
         let mut out = tokio::fs::File::create(&part).await?;
+        let mut hash = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
         let (mut got, mut shown) = (0u64, 0u64);
         while let Some(chunk) = resp.chunk().await? {
             tokio::io::AsyncWriteExt::write_all(&mut out, &chunk).await?;
+            hash.update(&chunk);
             got += chunk.len() as u64;
             if total > 50_000_000 && got * 20 / total > shown {
                 shown = got * 20 / total;
@@ -107,8 +170,10 @@ async fn ensure_model(dir: &Path) -> Result<()> {
             }
         }
         tokio::io::AsyncWriteExt::flush(&mut out).await?;
-        if total > 0 && got != total {
-            bail!("download of {file} stopped at {got} of {total} bytes; run again to retry");
+        let sum: String = hash.finish().as_ref().iter().map(|b| format!("{b:02x}")).collect();
+        if model.files.iter().any(|&(f, want)| f == file && want != sum) {
+            std::fs::remove_file(&part)?;
+            bail!("{file} from {url} does not match its checksum ({got} bytes); nothing was kept, run again to retry");
         }
         std::fs::rename(&part, &target)?;
     }
@@ -116,18 +181,18 @@ async fn ensure_model(dir: &Path) -> Result<()> {
 }
 
 async fn load_detector() -> Result<detect::Detector> {
-    let mut detector = if let Ok(dir) = std::env::var("HOLDBACK_STUDENT_DIR") {
-        eprintln!("Loading the distilled privacy model from {dir}...");
-        detect::Detector::Student(Box::new(student::Student::load(Path::new(&dir)).context("could not load the distilled model")?))
-    } else {
-        let dir = model_dir();
-        if MODEL_FILES.iter().any(|f| !dir.join(f).exists()) {
-            eprintln!("Downloading the privacy model (OpenAI Privacy Filter, q4, about 0.9 GB) to {}", dir.display());
-            ensure_model(&dir).await?;
-        }
-        eprintln!("Loading the privacy model...");
-        detect::Detector::load(&dir).context("could not load the privacy model")?
+    let model = chosen()?;
+    let dir = model.dir();
+    if !model.missing().is_empty() {
+        eprintln!("Downloading {} ({}) to {}", model.title, model.size, dir.display());
+        ensure_model(model).await?;
+    }
+    eprintln!("Loading {}...", model.title);
+    let loaded = match model.name == DISTILLED.name {
+        true => student::Student::load(&dir).map(|s| detect::Detector::Student(Box::new(s))),
+        false => detect::Detector::load(&dir),
     };
+    let mut detector = loaded.with_context(|| format!("could not load {} from {}", model.title, dir.display()))?;
     detector.detect("Warm-up: Alice Example, alice@example.com")?;
     Ok(detector)
 }

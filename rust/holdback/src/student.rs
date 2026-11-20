@@ -1,5 +1,5 @@
-//! The distilled detector: a 6-layer multilingual BERT encoder with a token-classification head, trained to label the
-//! same eight categories as the Privacy Filter. Selected by HOLDBACK_STUDENT_DIR, a directory with config.json,
+//! The distilled detector, holdback's default: a 6-layer multilingual BERT encoder with a token-classification head,
+//! trained by distill/ to label the same eight categories as the Privacy Filter. Its directory holds config.json,
 //! model.safetensors (f32) and tokenizer.json. Weights are read in place from the memory-mapped file, so they count
 //! as file cache, not process memory.
 use crate::detect::{SEPARATORS, Span};
@@ -337,18 +337,18 @@ fn erf(x: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    /// Logits that PyTorch gives for a few windows (testdata/student_logits.json). Runs when HOLDBACK_STUDENT_DIR
-    /// points at the model.
+    /// Logits that PyTorch gives for a few windows (testdata/student_logits.json), for the published model. Skipped
+    /// until the model is downloaded (`holdback serve` once).
     #[test]
     fn matches_pytorch() {
-        let Ok(dir) = std::env::var("HOLDBACK_STUDENT_DIR") else {
-            eprintln!("skipped: HOLDBACK_STUDENT_DIR is not set");
+        if !crate::DISTILLED.missing().is_empty() {
+            eprintln!("skipped: the distilled model is not in {}", crate::DISTILLED.dir().display());
             return;
-        };
+        }
         let fixture: serde_json::Value = serde_json::from_str(include_str!("testdata/student_logits.json")).unwrap();
         let windows: Vec<Vec<u32>> = serde_json::from_value(fixture["windows"].clone()).unwrap();
         let want: Vec<f32> = serde_json::from_value(fixture["logits"].clone()).unwrap();
-        let student = super::Student::load(std::path::Path::new(&dir)).unwrap();
+        let student = super::Student::load(&crate::DISTILLED.dir()).unwrap();
         let refs: Vec<&[u32]> = windows.iter().map(Vec::as_slice).collect();
         let got = student.model.logits(&refs, student.cls, student.sep, &mut super::Work::default()).unwrap();
         assert_eq!(got.len(), want.len());

@@ -164,7 +164,7 @@ fn labels_to_spans(path: &[usize], l: &Labels) -> Vec<(usize, usize, usize)> {
     out
 }
 
-/// The detector holdback uses: the Privacy Filter, or the distilled student when HOLDBACK_STUDENT_DIR is set.
+/// The detector holdback uses: the distilled model by default, or the Privacy Filter (HOLDBACK_DETECTOR).
 pub enum Detector {
     Filter(Box<Filter>),
     Student(Box<crate::student::Student>),
@@ -187,7 +187,7 @@ impl Detector {
     pub fn name(&self) -> &'static str {
         match self {
             Detector::Filter(_) => "privacy-filter",
-            Detector::Student(_) => "student",
+            Detector::Student(_) => "distilled",
         }
     }
 }

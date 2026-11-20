@@ -1,4 +1,5 @@
-# Linux build, lint and the runtime's parity test. macOS is checked locally before each push.
+# Linux build, lint, and the tests of both detectors, including their parity with ONNX Runtime and PyTorch. macOS is
+# checked locally before each push.
 name: ci
 on:
   push:
@@ -17,11 +18,12 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/holdback
-          key: privacy-filter-q4
+          key: models-${{ hashFiles('rust/holdback/src/main.rs') }}  # main.rs pins the model revisions
       - run: cargo clippy --release --all-targets -- -D warnings
-      - name: Download the model and detect a sample
+      - name: Download both detectors and detect a sample with each
         run: |
           cargo build --release
           echo '{"texts": ["Contact Alice Example at alice@example.com"]}' > "$RUNNER_TEMP/sample.json"
           ./target/release/holdback spans "$RUNNER_TEMP/sample.json"
+          HOLDBACK_DETECTOR=privacy-filter ./target/release/holdback spans "$RUNNER_TEMP/sample.json"
       - run: cargo test --release

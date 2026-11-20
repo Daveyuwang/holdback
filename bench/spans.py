@@ -34,14 +34,20 @@ def spans(texts: list[str], name: str, sequence: bool = False) -> list[dict]:
     """holdback, for each text: {"detected": the detector alone, "refined": with holdback's rules}.
     With sequence, the texts go through one placeholder map in order and each text gets {"all", "twice"}: what
     is replaced when a known value is replaced everywhere, or when a one-word person waits for a second text.
-    With HOLDBACK_STUDENT_DIR set, the binary runs that distilled model, cached under names starting with student_."""
+    Results are cached per detector: the default distilled model without a prefix, HOLDBACK_DETECTOR=privacy-filter
+    under privacy_filter_, and another distilled model in HOLDBACK_STUDENT_DIR under student_."""
     def compute():
         with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
             json.dump({"texts": texts, "sequence": sequence}, f, ensure_ascii=False)
             f.flush()
             return json.loads(subprocess.run([BINARY, "spans", f.name], capture_output=True, text=True, check=True).stdout)
-    student = "student_" if os.environ.get("HOLDBACK_STUDENT_DIR") else ""
-    return cached(student + name + "_sequence" * sequence, compute)
+    return cached(detector_prefix() + name + "_sequence" * sequence, compute)
+
+
+def detector_prefix() -> str:
+    if os.environ.get("HOLDBACK_DETECTOR") == "privacy-filter":
+        return "privacy_filter_"
+    return "student_" if os.environ.get("HOLDBACK_STUDENT_DIR") else ""
 
 
 def codex(texts: list[str], name: str) -> list:

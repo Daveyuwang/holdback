@@ -1,35 +1,36 @@
 # Status and next steps
 
-## 0.1.2
+## 0.2
 
 holdback keeps personal data and secrets out of what coding agents send to cloud models, in two modes: a
-local proxy that redacts whole requests, and hooks inside Claude Code that redact what tools return. The
-README has the measurements and the limits.
+local proxy that redacts whole requests, and hooks inside Claude Code that redact what tools return. Since 0.2 its
+detector is a model of 28M parameters distilled from OpenAI's Privacy Filter, which `HOLDBACK_DETECTOR` can bring
+back. The README has the measurements and the limits.
 
 What the release rests on:
 
-- Task success stays at 98 to 100% on the task benchmark, and at 44 to 45 of 45 real agent tasks with hook
-  mode on, the same as with it off.
-- No planted value appears in any recorded request in the hook-mode checks, on Haiku 5.5, Sonnet 5.5 and
-  Opus 5.5.
-- 0 to 4 false replacements per 100 KB of developer output.
+- 0 to 5% of labeled personal values missed on public sets, against 10 to 14% with the Privacy Filter, and no
+  value leaked on the generated agent tasks.
+- 44 to 45 of 45 real agent tasks pass with hook mode on, the same as with it off, on Haiku 5.5, Sonnet 5.5 and
+  Opus 5.5, and no planted value appears in any recorded request.
+- 2 to 4 false replacements per 100 KB of developer output.
+- A request takes 5 to 7 times less time than with the Privacy Filter, and the model is a 115 MB download.
 - Binaries for macOS and Linux, built and checked on clean machines by the release workflow.
 
 ## Known gaps
 
-- 10 to 14% of labeled personal values are missed on public sets; Chinese personal names most of all.
+- In French, German, Italian, Spanish and Dutch the distilled model misses 11 to 18% of labeled values, where the
+  Privacy Filter misses 5 to 16%; other scripts are untested.
+- In Chinese it sometimes takes a common word for a name.
+- Task success under redaction was last measured with the Privacy Filter; it needs a rerun with the distilled
+  model, which calls model APIs.
 - Hook mode does not cover the system prompt, what the user types, or the output of a failed tool call.
 - The real-session benchmark is narrow: short tasks on Rust crates.
-- Checking new content is slow for large outputs: about 0.7 s per 10 KB.
 - Codex is checked through an OpenAI-compatible provider, not with GPT models.
 
 ## Next
 
-1. The distilled detector is on [Hugging Face](https://huggingface.co/limbo23/holdback-student) and runs behind
-   `HOLDBACK_STUDENT_DIR`. In the first measurements it missed 13% of the Chinese names in a news test set where
-   the Privacy Filter missed 67%, though it takes more common words for names. It found secrets in code about as
-   often and checked text 7 to 14 times faster on an Apple M5. Its training and evaluation code is in
-   `distill/`. Still to do: decide whether it becomes the default.
+1. Rerun the task-success benchmark with the distilled model.
 2. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
 3. Homebrew and npm packages, when asked for.
 

@@ -57,7 +57,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/holdback
-          key: privacy-filter-q4
+          key: distilled-${{ hashFiles('rust/holdback/src/main.rs') }}
           enableCrossOsArchive: true
       - run: holdback --version && holdback doctor
       - name: Detect a sample

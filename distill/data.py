@@ -86,7 +86,7 @@ def crates() -> list[Path]:
 
 def spans(texts: list[str]) -> list[dict]:
     """The Privacy Filter's spans for each text: "detected" alone, "refined" after holdback's rules."""
-    env = {k: v for k, v in os.environ.items() if k != "HOLDBACK_STUDENT_DIR"}  # the teacher is the Privacy Filter
+    env = {k: v for k, v in os.environ.items() if k != "HOLDBACK_STUDENT_DIR"} | {"HOLDBACK_DETECTOR": "privacy-filter"}  # the teacher
     with tempfile.TemporaryDirectory() as d:
         batch = Path(d) / "batch.json"
         batch.write_text(json.dumps({"texts": texts}))
