@@ -152,12 +152,12 @@ HOLDBACK_KEY_ENV=BAILIAN_API_KEY holdback run codex --upstream bailian -m qwen3.
 ## 已知局限
 
 - 在蒸馏模型没有训练过的两个个人信息公开数据集上，holdback 漏掉 0.6%（PrivacyBench）和 5.4%（ai4privacy 英文部分）的标注值。ai4privacy 上漏掉的大多是城市、邮编、用户名和出生日期。它在 [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) 和 Nemotron-PII 上的数字不算留出检验：基准里 400 条 PII Bench ZH 中有 300 条是训练数据，训练也用了 Nemotron-PII 的训练集。
-- 蒸馏模型不会替换 crate 的 `Cargo.toml` 里 `authors` 列表中的姓名和邮箱，因为它的训练文本把这些标成了非隐私内容。在 `bench/real_eval.py` 用到的九个 crate 的清单里，12 个姓名和 12 个邮箱它一个都没替换，Privacy Filter 替换了 8 个姓名和 11 个邮箱（`bench/dev_eval.py --authors`）。设置 `HOLDBACK_DETECTOR=privacy-filter` 或用 `holdback replace` 可以补上。
+- 蒸馏模型不会替换 crate 的 `Cargo.toml` 里 `authors` 列表中的姓名和邮箱，因为它的训练文本把这些标成了非隐私内容。在 `bench/real_eval.py` 用到的九个 crate 的清单里，12 个姓名和 12 个邮箱它一个都没替换，Privacy Filter 替换了 8 个姓名和 11 个邮箱（`bench/dev_eval.py --authors`）。在 Haiku 用钩子模式处理这些 crate 的会话里，这 24 个值全部发到了服务商（`bench/real_eval.py`）。设置 `HOLDBACK_DETECTOR=privacy-filter` 或用 `holdback replace` 可以补上。
 - 在法语、德语、意大利语、西班牙语和荷兰语文本上，蒸馏模型比 Privacy Filter 漏得多：漏掉 11% 到 18% 的标注值，Privacy Filter 是 5% 到 16%，漏的主要是出生日期、门牌号、邮编和证件号（每种语言取 ai4privacy 的 100 行，见 `distill/heldout.py`）。处理这类文本时请设置 `HOLDBACK_DETECTOR=privacy-filter`。韩文、阿拉伯文、印地文等其他文字还没有测过。
 - 在中文文本里，蒸馏模型有时会把普通词当成人名：在新闻文本上误替换了 2.5% 的其他字符，Privacy Filter 是 0.6%（`distill/heldout.py`）。
 - [CredData](https://github.com/Samsung/CredData) 收集的是源码文件里的密钥，holdback 在上面漏掉 30%。其中一半以上是 UUID，holdback 有意保留它们，因为 agent 要拿 UUID 当标识符用。
 - 长文本第一次发送时最慢，在 Apple 芯片的 Mac 上，一个 4.8 万字符的文件要多花约 0.4 秒。之后的请求会复用这次的结果；和之前的文本只差一点的内容，比如编辑后的文件，只需要处理变动的部分，13 KB 的文件约 25 毫秒。
-- 公众人物的名字有时会被替换。
+- 公众人物的名字有时会被替换。单独出现的数字也会，比如一个计数或进程号，检测模型可能把它当成账号。
 - 文本层面的脱敏看不到 agent 自己编码过的数据。测试中有一个模型用 `od` 打印文件，绕开占位符读到了密码。系统提示现在禁止这样做，holdback 本身还没有强制手段。
 - 模型在哪里写出占位符，holdback 就在哪里还原，不检查命令会把值发到哪里。测试中在 README 里埋了一条指令，让 agent 把密钥发给外部服务器，agent 每次都拒绝了。
 - 模型看不到的值，它也没法推理。数 `.edu` 邮箱的个数、按出生日期算年龄，这类任务注定失败。
@@ -220,7 +220,7 @@ uv run python bench/task_eval.py --runs 1        # 五种条件下的任务成�
 
 `bench/real_eval.py` 跑的是真实的智能体会话：让 Claude Code 以无界面方式在九个公开 crate 的副本上各做五个任务，
 钩子模式开和关各跑一遍。每个任务都有程序能验证的检查，比如把清单里的维护者写进一个文件，或者改掉预埋 `.env`
-里的端口而不动密码。发往服务商的请求全部记录下来。
+里的端口而不动密码。发往服务商的请求全部记录下来，脚本会统计其中出现的预埋密钥和维护者的姓名、邮箱。
 
 | 真实会话，45 个任务 | 钩子模式开，通过 | 钩子模式关，通过 | 发出的预埋值 | 存下的值里错的 |
 | --- | --- | --- | --- | --- |

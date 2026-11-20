@@ -3,10 +3,11 @@
 Claude Code runs headless on copies of public crates that cargo has already fetched. Every task has a check a
 program can verify. Each run starts from a fresh copy and, with hook mode on, a fresh saved map. Requests go to
 the provider through a recording pass-through, so the check reads what was sent. Each copy gets a `.env` with
-made-up secrets; everything else in it is public, maintainers' names and emails included.
+made-up secrets; everything else in it is public, maintainers' names and emails included, which hook mode should
+still replace.
 
-Reports, per mode: tasks passed, time, tool calls and their size; with hook mode on, the planted values found in
-recorded requests, the values saved, and how many of them are wrong. A saved value is right when it is a
+Reports, per mode: tasks passed, time, tool calls and their size; with hook mode on, the planted values and the
+maintainers' names and emails found in recorded requests, the values saved, and how many of them are wrong. A saved value is right when it is a
 planted secret or part of a maintainer's entry, wrong when it is a file name, a path, an identifier or an id,
 and unjudged otherwise; unjudged values are listed as shapes.
 
@@ -30,6 +31,7 @@ from pathlib import Path
 
 from check_agents import DB_PW, ENV, STRIPE
 from check_hooks import free_port
+from dev_eval import people
 from spans import BINARY
 
 PLUGIN = Path(__file__).parent.parent / "plugins/claude-code"
@@ -126,7 +128,7 @@ def run(crate: str, src: Path, name: str, prompt: str, check, hooks: bool, a, re
     saved = json.loads((work / "state/values.json").read_text())["values"] if (work / "state/values.json").exists() else {}
     sent = "\n".join(SENT.get(run_id, []))
     shutil.rmtree(work, ignore_errors=True)
-    return {"id": run_id, "hooks": hooks, "ok": ok, "seconds": seconds, "calls": calls, "size": size, "saved": saved,
+    return {"id": run_id, "crate": crate, "hooks": hooks, "ok": ok, "seconds": seconds, "calls": calls, "size": size, "saved": saved,
             "leaked": [s for s in (DB_PW, STRIPE) if s in sent], "answer": answer[-300:]}
 
 
@@ -154,7 +156,7 @@ def main():
     a = ap.parse_args()
     recorder = ThreadingHTTPServer(("127.0.0.1", 0), Recorder)
     threading.Thread(target=recorder.serve_forever, daemon=True).start()
-    jobs, all_authors = [], []
+    jobs, all_authors, maintainers = [], [], {}
     for crate in CRATES:
         found = sorted(glob.glob(f"{Path.home()}/.cargo/registry/src/*/{crate}-[0-9]*"))
         if not found:
@@ -162,6 +164,7 @@ def main():
             continue
         todo, authors = tasks(Path(found[-1]))
         all_authors += authors
+        maintainers[crate] = {entry[s:e] for entry in authors for s, e, _ in people(entry)}
         jobs += [(crate, Path(found[-1]), name, prompt, check, hooks) for name, (prompt, check) in todo.items() for hooks in ((True,) if a.only_on else (True, False))]
     with ThreadPoolExecutor(a.jobs) as pool:
         results = list(pool.map(lambda j: run(*j, a, recorder.server_port), jobs))
@@ -177,6 +180,7 @@ def main():
         if not r["ok"]:
             print(f"  failed {r['id']}: the agent said: {r['answer'][-200:]!r}")
     on = [r for r in results if r["hooks"]]
+    exposed = sum(v in "\n".join(SENT.get(r["id"], [])) for r in on for v in maintainers[r["crate"]])
     verdicts = Counter()
     listed = []
     for r in on:
@@ -186,7 +190,8 @@ def main():
             if verdict != "right":
                 listed.append(f"  {verdict:8s} {r['id']:24s} {placeholder.rsplit('_', 1)[0][1:]:16s} {value if a.show else shape(value)!r}")
     total = sum(verdicts.values())
-    print(f"with hook mode on: planted values in recorded requests: {sum(len(r['leaked']) for r in on)}; values saved {total}: "
+    print(f"with hook mode on: planted values in recorded requests: {sum(len(r['leaked']) for r in on)}; maintainers' names and "
+          f"emails in them: {exposed}, each counted once per run; values saved {total}: "
           f"right {verdicts['right']}, wrong {verdicts['wrong']} ({verdicts['wrong'] / max(1, total):.0%}), unjudged {verdicts['unjudged']}")
     print("\n".join(sorted(listed)))
     print(f"model {a.model}")

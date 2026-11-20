@@ -24,6 +24,7 @@ What the release rests on:
 - In Chinese it sometimes takes a common word for a name.
 - It leaves the maintainers' names and emails in `Cargo.toml` `authors` lists in place, and its PII Bench ZH
   numbers are not held out. Both come from faults in its training data, listed in `distill/README.md`.
+- Both detectors sometimes take a number that stands alone, such as a count or a process id, for an account number.
 - Task success under redaction was last measured with the Privacy Filter; it needs a rerun with the distilled
   model, which calls model APIs.
 - Hook mode does not cover the system prompt, what the user types, or the output of a failed tool call.
@@ -32,9 +33,11 @@ What the release rests on:
 
 ## Next
 
-1. Retrain the distilled model with those training-data faults fixed.
-2. Rerun the task-success benchmark with the distilled model.
-3. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
-4. Homebrew and npm packages, when asked for.
+1. Publish the distilled model retrained on the fixed data, which replaces the maintainers' names and emails, and
+   make it the default.
+2. A rule that keeps a number standing alone, such as a count, unless the text around it names an account.
+3. Rerun the task-success benchmark with the distilled model.
+4. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
+5. Homebrew and npm packages, when asked for.
 
 Reports of wrong replacements are welcome. `holdback review --masked` output is safe to attach to an issue.

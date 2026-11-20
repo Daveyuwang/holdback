@@ -203,7 +203,8 @@ are stored in `~/.config/holdback/lists.json`.
 - The distilled model leaves the names and emails in a crate's `Cargo.toml` `authors` list in place, because its
   training text labeled them as not private. In the manifests of the nine crates `bench/real_eval.py` uses, it
   replaced none of 12 names and 12 emails, and the Privacy Filter replaced 8 names and 11 emails
-  (`bench/dev_eval.py --authors`). `HOLDBACK_DETECTOR=privacy-filter` or `holdback replace` covers them.
+  (`bench/dev_eval.py --authors`). In Haiku's hook-mode sessions on those crates, all 24 reached the provider
+  (`bench/real_eval.py`). `HOLDBACK_DETECTOR=privacy-filter` or `holdback replace` covers them.
 - In French, German, Italian, Spanish and Dutch the distilled model misses more than the Privacy Filter: 11 to 18%
   of labeled values against 5 to 16%, mostly dates of birth, building numbers, postcodes and ID numbers (100 rows
   of ai4privacy per language, `distill/heldout.py`). For such text, set `HOLDBACK_DETECTOR=privacy-filter`. Other
@@ -215,7 +216,8 @@ are stored in `~/.config/holdback/lists.json`.
 - A long input takes longest the first time it is sent: a 48,000-character file adds about 0.4 seconds on an
   Apple silicon Mac. Later requests reuse the result, and a text that differs a little from an earlier one, such
   as a file after an edit, costs only its changed parts: about 25 ms for a 13 KB file.
-- Names of public figures are sometimes replaced.
+- Names of public figures are sometimes replaced, and so is a number that stands alone, such as a count or a
+  process id, which the detector can take for an account number.
 - Text-level redaction cannot see data that an agent encodes itself. In testing, one model printed a file with
   `od` to read a password around the redaction. The system line now forbids this, but holdback does not enforce
   it.
@@ -293,7 +295,8 @@ keep them. With the Privacy Filter the rules leave 7 and 0 false replacements pe
 `bench/real_eval.py` runs real agent sessions: Claude Code, headless, on copies of nine public crates, five
 tasks each, with hook mode on and with it off. Every task has a check a program can verify, such as writing
 the maintainers from the manifest to a file, or fixing a port in a planted `.env` without touching its
-password. Requests are recorded on their way to the provider.
+password. Requests are recorded on their way to the provider, and the script counts the planted secrets and the
+maintainers' names and emails found in them.
 
 | Real sessions, 45 tasks | Passed, hook mode on | Passed, hook mode off | Planted values sent | Saved values that are wrong |
 | --- | --- | --- | --- | --- |
