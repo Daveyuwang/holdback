@@ -45,7 +45,7 @@ static STRUCTURE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"\b\d{2,5}:\d{2,5}\b",
         r#""(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS) [^"\s?]+"#,
         r#"(?:/Users/|/home/|C:\\Users\\)[^/\\\s"']+([/\\][^\s"']+)"#,
-        r"(?m)^([dlcbps-][rwxsStT-]{9}[@+.]?\s+\d+)\s+\S+\s+\S+\s+(\d+)\s", // ls -l: mode and link count, size
+        r"(?m)^([dlcbps-][rwxsStT-]{9}[@+.]?\s+\d+)\s+\S+\s+(\S+)\s+(\d+)\s", // ls -l: mode and link count, group, size
         r"(?i)(?<=\bport )\d{2,5}\b",
         r"(?i)\b(?:no-?reply|do-?not-?reply)@[a-z0-9-]+(?:\.[a-z0-9-]+)+\b", // an address nobody reads
         r"\bClaude (?:Code|Opus|Sonnet|Haiku|Fable)\b(?: \d+(?:\.\d+)*)?", // the agent's own name, as in a commit trailer
@@ -82,6 +82,10 @@ static NAMED_ID: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?i)\b(?:task|job|shell|run|session|request|trace|span|build|deploy)[ _-]?id\b["':= >]{1,4}([A-Za-z0-9_-]{6,40})|\bwith ID: ([a-z0-9]{6,16})\b"#)
 });
 static BIRTH: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)(?:dob|d\.o\.b|birth|born|出生|生日)[^\n]{0,16}$"));
+/// Words before a number that make it private, such as an account number, a PIN or a postcode, rather than a count.
+static NUMBER_NAMED: LazyLock<Regex> = LazyLock::new(|| {
+    re(r"(?i)account|acct|\ba/c\b|iban|card|routing|\bssn\b|social security|passport|licen[cs]e|member|customer|employee|policy|patient|\bmrn\b|\btax\b|\bbank|banca|bancari|\bswift\b|\bid\b|identification|identity|national|record|medical|health|insurance|serial|device|vehicle|claim|confirmation|booking|reservation|\bpin\b|\bcvv|\bcvc|security code|verification|\botp\b|zip|postal|post ?code|address|phone|\btel\b|mobile|账号|账户|卡号|身份证|工号|会员|客户|编号|密码|验证码|邮编|电话|手机|地址|nummer|numero|número|numéro|conto|cuenta|compte|konto|rekening|contraseña|passwort|wachtwoord|mot de passe|documento|tarjeta|carta|carte|karte|codice|código|telefon|teléfono|téléphone|adres|indirizzo|dirección|\bcap\b|\bplz\b")
+});
 static SECRET_NAME: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)(?:secret|token|passw|pwd|nonce|salt|credential|key)s?\W{1,8}$"));
 const SURNAMES: &str = "王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤";
 static ZH_SPEAKER: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"(?m)^([{SURNAMES}][\x{{4e00}}-\x{{9fff}}]{{1,2}})[：:]")));
@@ -118,6 +122,8 @@ static URL: LazyLock<Regex> = LazyLock::new(|| re(r#"(?i)\b[a-z][a-z0-9+.-]*://[
 static FILE_PATH: LazyLock<Regex> = LazyLock::new(|| re(r#"(?<![\w:/.])~?/(?!/)[^\s"'`<>:]+|\b[A-Za-z]:\\[^\s"'`<>]+"#));
 /// Field names sit where values sit, so the detector sometimes tags them. They are never private values.
 const FIELD_WORDS: &[&str] = &["name", "email", "phone", "address", "user", "username", "date", "city", "id", "port"];
+static CSV_FIELD: LazyLock<Regex> = LazyLock::new(|| re(r"^[A-Za-z_][A-Za-z0-9_ -]{0,40}$"));
+static EMAIL_IN: LazyLock<Regex> = LazyLock::new(|| re(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"));
 /// Lowercase words joined by - _ or . with no spaces: a build target, a package, a model or a folder name.
 static JOINED_WORDS: LazyLock<Regex> = LazyLock::new(|| re(r"^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+$"));
 /// A word that announces a secret somewhere in the text just before a value ("the password is ...").
@@ -145,6 +151,19 @@ fn enclosing_name(text: &str, start: usize, end: usize) -> &str {
 
 /// The agents themselves. Alone, the name is the assistant; "Claude Dubois" is still a person.
 const AGENT_NAMES: &[&str] = &["claude", "codex"];
+
+/// Whether a span lies in the name of a command-line option, such as `bel` in `usage: cat [-belnstuv]`. The value
+/// after `=` is not part of the name: `--author=maria` keeps `maria` a candidate.
+fn in_option(text: &str, start: usize, end: usize) -> bool {
+    if text[start..end].contains(char::is_whitespace) {
+        return false;
+    }
+    let from = text[..start].rfind(char::is_whitespace).map_or(0, |i| i + 1);
+    let to = text[end..].find(char::is_whitespace).map_or(text.len(), |i| end + i);
+    let token = text[from..to].trim_start_matches(['[', '(', '"', '\'', '`']);
+    let name_end = to - token.len() + token.find('=').unwrap_or(token.len());
+    token.starts_with('-') && token.trim_start_matches('-').starts_with(|c: char| c.is_ascii_alphabetic()) && end <= name_end
+}
 /// `plugin:skill`, `image:tag`, `package:target`: lowercase names joined by a colon, with a hyphen or underscore
 /// somewhere. A person found inside one is an identifier, unless a field name comes before the colon (`user:`).
 static NAMESPACED: LazyLock<Regex> =
@@ -212,6 +231,21 @@ fn protected(text: &str, rules: &[Span]) -> Vec<Range> {
     for c in [&*CONFIG_SECRET, &*JSON_SECRET].into_iter().flat_map(|rx| rx.captures_iter(text).flatten()) {
         out.push((c.get(0).unwrap().start(), c.get(1).unwrap().start()));
     }
+    // the header of a CSV, such as `name,email,plan`: the first line of a block of lines with the same number of
+    // commas, made of field names, one of them a word like name or email
+    let lines: Vec<(usize, &str)> = text.split_inclusive('\n').scan(0, |at, l| Some((std::mem::replace(at, *at + l.len()), l.trim_end_matches(['\n', '\r'])))).collect();
+    for (i, &(at, line)) in lines.iter().enumerate() {
+        let commas = line.matches(',').count();
+        let field = |cell: &str| cell.to_ascii_lowercase().split(['_', ' ', '-']).any(|w| FIELD_WORDS.contains(&w));
+        if commas > 0
+            && (i == 0 || !lines[i - 1].1.contains(','))
+            && lines.get(i + 1).is_some_and(|&(_, next)| next.matches(',').count() == commas)
+            && line.split(',').all(|c| CSV_FIELD.is_match(c.trim()).unwrap_or(false))
+            && line.split(',').any(field)
+        {
+            out.push((at, at + line.len()));
+        }
+    }
     for m in URL.find_iter(text).flatten() {
         let (url, base) = (m.as_str(), m.start());
         let scheme_end = url.find("://").unwrap() + 3;
@@ -222,6 +256,35 @@ fn protected(text: &str, rules: &[Span]) -> Vec<Range> {
         out.push((base + host_start, base + q));
     }
     out.retain(|&(s, e)| !rules.iter().any(|r| r.start < e && s < r.end));
+    out
+}
+
+/// Whether `start..end` is a number of up to six digits standing alone, such as a count, a process id or a size: no
+/// other letter or digit in its word (the rest of `756.8847.7647.90`, `14355` or `CH-9555`), no other span next to it
+/// (half of a phone number is not alone), and nothing on its line before it that names something private, such as an
+/// account, a PIN or a password.
+fn standalone_number(text: &str, start: usize, end: usize, spans: &[Span], own: &Span) -> bool {
+    let value = &text[start..end];
+    let from = text[..start].rfind(char::is_whitespace).map_or(0, |i| i + 1);
+    let to = text[end..].find(char::is_whitespace).map_or(text.len(), |i| end + i);
+    let line = chars_before(text, start, 32).rsplit('\n').next().unwrap_or_default();
+    (1..=6).contains(&value.len())
+        && value.bytes().all(|b| b.is_ascii_digit())
+        && !text[from..start].chars().chain(text[end..to].chars()).any(char::is_alphanumeric)
+        && !spans.iter().any(|o| !std::ptr::eq(o, own) && o.start <= end + 1 && start <= o.end + 1)
+        && !NUMBER_NAMED.is_match(line).unwrap_or(false)
+        && !SECRET_NEAR.is_match(line).unwrap_or(false)
+}
+
+/// The parts of `start..end` on each line.
+fn lines_of(text: &str, start: usize, end: usize) -> Vec<Range> {
+    let mut out = vec![];
+    let mut from = start;
+    for (i, _) in text[start..end].match_indices('\n') {
+        out.push((from, start + i));
+        from = start + i + 1;
+    }
+    out.push((from, end));
     out
 }
 
@@ -285,12 +348,21 @@ pub fn refine(text: &str, spans: &[Span]) -> Vec<Span> {
         if sp.label == "private_person" && is_name(value) && value.contains(|c: char| c.is_ascii_digit()) && value.split(['-', '_', '.']).count() >= 3 {
             continue;
         }
+        if matches!(sp.label.as_str(), "private_person" | "private_address") && in_option(text, sp.start, sp.end) {
+            continue;
+        }
+        // shell syntax is not a secret: `&& cat` in `ls -la && cat -A notes.txt`
+        if sp.label == "secret" && value.split_whitespace().any(|t| matches!(t, "&&" | "||" | "|" | ";" | ">" | ">>" | "<")) {
+            continue;
+        }
         let pieces = subtract(sp, &holes);
         let left: usize = pieces.iter().map(|(s, e)| e - s).sum();
         if sp.label == "private_date" && left * 2 < sp.end - sp.start {
             continue; // the date itself is kept, and what is left around it is not a date
         }
-        for (s, e) in pieces {
+        // each line's part of a span is judged on its own, so that a placeholder never takes a line break with it:
+        // `plan\nMaria Gonzalez` from a CSV header and the row under it
+        for (s, e) in pieces.into_iter().flat_map(|(s, e)| lines_of(text, s, e)) {
             let frag = &text[s..e];
             let stripped = frag.trim_matches(STRIP);
             // hosts and paths are kept, so what is left of a URL has nothing to replace when it is only a host,
@@ -307,8 +379,17 @@ pub fn refine(text: &str, spans: &[Span]) -> Vec<Span> {
             let word = stripped.to_ascii_lowercase();
             if FIELD_WORDS.contains(&word.as_str()) || AGENT_NAMES.contains(&word.as_str()) {
                 continue;
-            }            let off = frag.find(stripped).unwrap_or(0);
-            kept.push(Span { start: s + off, end: s + off + stripped.len(), label: sp.label.clone() });
+            }
+            let mut at = (s + frag.find(stripped).unwrap_or(0), 0);
+            at.1 = at.0 + stripped.len();
+            if matches!(sp.label.as_str(), "account_number" | "secret") && standalone_number(text, at.0, at.1, spans, sp) {
+                continue;
+            }
+            // an email span is the address, not the cell after it: `maria@example.com,pro`
+            if sp.label == "private_email" && let Ok(Some(m)) = EMAIL_IN.find(stripped) {
+                at = (at.0 + m.start(), at.0 + m.end());
+            }
+            kept.push(Span { start: at.0, end: at.1, label: sp.label.clone() });
         }
     }
     kept.extend(rules);
@@ -375,6 +456,15 @@ mod tests {
         assert!(replaced("name = \"Maria Gonzalez\"", "Maria Gonzalez", "private_person"));
         assert!(replaced("SSN on file: 123.45.6789", "123.45.6789", "account_number"));
         assert!(!replaced("upgrade to version 12.4.1 today", "12.4.1", "account_number"));
+        assert!(!replaced("$ grep -r unsafe src | wc -l\n151", "151", "account_number"));
+        assert!(!replaced("killed PID 48213", "48213", "account_number"));
+        assert!(!replaced("max_connections = 65536", "65536", "account_number"));
+        assert!(replaced("account 4471023", "4471023", "account_number"));
+        assert!(replaced("Customer ID: 48213", "48213", "account_number"));
+        assert!(replaced("工号 104382", "104382", "account_number"));
+        assert!(replaced("**PIN**: 519782", "519782", "account_number"));
+        assert!(replaced("ZIP Code: 90280", "90280", "account_number"));
+        assert!(replaced("transfer to 12345678901", "12345678901", "account_number"));
         assert!(!replaced("nc: connect to db.internal.example.io port 5433 failed", "db.internal.example.io", "private_url"));
         assert!(!replaced("database orders is ready", "orders", "private_url"));
         assert!(!replaced("pod tickets-svc-3de40b-xbgw0 restarted", "3de40b-xbgw0", "secret"));
@@ -458,6 +548,16 @@ mod tests {
                 "论文润色、实验组织 and 论文表格.\n- dataviz: Use this skill whenever you are about to create a chart.\n- loop: Run a prompt on a recurring interval.",
                 &["dataviz", "loop"],
                 &[],
+            ),
+            (
+                "pwd && ls -la && cat -A customers.csv\ndrwxr-xr-x@ 3 alex  wheel   96 Nov 20 06:35 .\ncat: illegal option -- A\nusage: cat [-belnstuv] [file ...]\n$ wc -l src/*.rs | tail -1\n151 total",
+                &["&& cat", "belnstuv", "151"],
+                &["alex"],
+            ),
+            (
+                "-rw-r--r--@ 1 alex  wheel  101 Nov 20 06:40 customers.csv\nname,email,plan\nMaria Gonzalez,maria.gonzalez@gmail.com,pro\nDaniel Okafor,dokafor88@outlook.com,team\n",
+                &["wheel", "name,email,plan", ",pro", ",team"],
+                &["alex", "Maria Gonzalez", "maria.gonzalez@gmail.com", "Daniel Okafor", "dokafor88@outlook.com"],
             ),
         ];
         // the detector's window cache changes no output: a text seen after a similar one gets the same spans

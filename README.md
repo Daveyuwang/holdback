@@ -14,25 +14,11 @@ Claude desktop app. [Hook mode](#hook-mode-for-the-desktop-app) lists what it do
 
 ## What it looks like
 
-A file on your machine:
+![A Claude Code run through holdback: the terminal shows real names and emails, the model provider receives placeholders](docs/demo.svg)
 
-```text
-name,email
-Maria Gonzalez,maria.gonzalez@gmail.com
-```
-
-What the model receives when the agent reads it:
-
-```text
-name,email
-[PRIVATE_PERSON_503],[PRIVATE_EMAIL_504]
-```
-
-The model writes a file with the placeholders, and holdback puts the values back before the file is written:
-
-```text
-Hello Maria Gonzalez <maria.gonzalez@gmail.com>
-```
+A recorded run of `holdback run claude` with Claude Haiku. The CSV on disk has real names and emails. The model
+provider receives placeholders in the tool result and writes placeholders in its tool call; holdback puts the real
+values back, so `welcome.txt` and the answer on screen have them.
 
 ## Placeholders instead of masks
 
@@ -43,7 +29,8 @@ detector found with `<REDACTED>` dropped it to 56 to 57%. Numbered placeholders 
 to 72 to 86%. With holdback's rules, which keep hosts, ports, paths, dates and IDs and replace only the secret
 part, it reached 98 to 100%. These runs used the Privacy Filter, holdback's detector before version 0.2; the
 distilled model that replaced it changes the same share of needed values on these tasks. [Benchmark](#benchmark)
-has the full tables and the commands to rerun them.
+has the full tables and the commands to rerun them, and the [technical report](docs/report.md) the design behind
+them and where holdback loses.
 
 ## Install
 
@@ -172,8 +159,9 @@ passes through to the upstream unchanged.
 - **Replaced:** names, emails, phone numbers, addresses, account and card numbers, dates of birth, passwords,
   API keys and tokens, and the user name in file paths. In a URL or connection string, holdback replaces only
   the password, token or key.
-- **Kept:** hosts, ports, paths, dates, versions, UUIDs, commit hashes, private IP addresses, cloud regions, and
-  ticket and order numbers. Agents need them, and none of them identifies a person.
+- **Kept:** hosts, ports, paths, dates, versions, UUIDs, commit hashes, private IP addresses, cloud regions,
+  ticket and order numbers, and numbers standing alone, such as counts and process ids. Agents need them, and none
+  of them identifies a person.
 - **Stable placeholders:** a value keeps its placeholder while the proxy runs, so the history an agent resends
   is identical every turn and prompt caching keeps working.
 - **One system line** tells the model that placeholders stand for real values and must be used as written.
@@ -210,8 +198,7 @@ are stored in `~/.config/holdback/lists.json`.
 - A long input takes longest the first time it is sent: a 48,000-character file adds about 0.4 seconds on an
   Apple silicon Mac. Later requests reuse the result, and a text that differs a little from an earlier one, such
   as a file after an edit, costs only its changed parts: about 25 ms for a 13 KB file.
-- Names of public figures are sometimes replaced, and so is a number that stands alone, such as a count or a
-  process id, which the detector can take for an account number.
+- Names of public figures are sometimes replaced.
 - Text-level redaction cannot see data that an agent encodes itself. In testing, one model printed a file with
   `od` to read a password around the redaction. The system line now forbids this, but holdback does not enforce
   it.
@@ -278,7 +265,7 @@ commands), with made-up names, emails and keys planted at known places.
 | Developer output | False replacements per 100 KB | Planted values leaked |
 | --- | --- | --- |
 | Tuning corpus, detector alone | 13 | 0 of 39 |
-| Tuning corpus, with holdback's rules | 3 | 0 of 39 |
+| Tuning corpus, with holdback's rules | 2 | 0 of 39 |
 | Held-out corpus, detector alone | 31 | 0 of 45 |
 | Held-out corpus, with holdback's rules | 2 | 0 of 45 |
 
@@ -299,9 +286,9 @@ maintainers' names and emails found in them.
 
 | Real sessions, 45 tasks | Passed, hook mode on | Passed, hook mode off | Planted secrets sent | Maintainers' details sent | Saved values that are wrong |
 | --- | --- | --- | --- | --- | --- |
-| Haiku 5.5 | 45 | 45 | 0 | 2 | 1 of 48 |
-| Sonnet 5.5 | 45 | 45 | 0 | 2 | 1 of 48 |
-| Opus 5.5 | 45 | 45 | 0 | 2 | 1 of 48 |
+| Haiku 5.5 | 45 | 45 | 0 | 2 | 1 of 51 |
+| Sonnet 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
+| Opus 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
 
 A task took 4 to 6 seconds on average with hook mode on or off. The two maintainers' details sent are the lone first
 name and the handle that holdback keeps; with the Privacy Filter, Haiku's sessions sent 7. The wrong value, the
@@ -345,8 +332,8 @@ their own, such as dates, occupation, country and organization, are not counted.
 | Codex patterns | 91.7%, 0.0% | 100.0%, 0.0% | 99.9%, 0.0% | 99.8%, 0.0% | 100.0%, 0.0% | 93.1%, 0.2% |
 | Presidio | 38.9%, 60.8% | 66.1%, 10.3% | 32.6%, 9.8% | 19.5%, 1.1% | 8.1%, 4.5% | 83.5%, 11.6% |
 | rehydra | 16.7%, 39.2% | 50.8%, 6.6% | 38.4%, 7.8% | 31.2%, 0.3% | 19.3%, 0.6% | 77.4%, 5.4% |
-| holdback | 0.0%, 3.2% | 0.0%, 16.9% | 5.8%, 11.3% | 1.6%, 0.2% | 1.0%, 0.5% | 30.1%, 6.6% |
-| holdback with the Privacy Filter | 0.3%, 3.2% | 14.4%, 17.5% | 12.7%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
+| holdback | 0.0%, 3.2% | 0.0%, 16.9% | 5.8%, 11.2% | 1.6%, 0.2% | 1.0%, 0.5% | 30.1%, 6.6% |
+| holdback with the Privacy Filter | 0.3%, 3.2% | 14.4%, 17.3% | 12.8%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
 
 The distilled model trained on other rows of PII Bench ZH and on Nemotron-PII's training split, so those two
 columns are not held out for it.
