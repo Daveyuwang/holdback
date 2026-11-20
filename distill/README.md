@@ -79,24 +79,12 @@ training.
 `fixture.py MODEL_DIR` writes the PyTorch logits that `student::tests::matches_pytorch` compares holdback's runtime
 with. The token ids depend on the model's vocabulary, so the committed fixture is for the published model.
 
-## The published model and a rebuild
+## The published model
 
-The published model was trained with this recipe before the code moved into this repository. Its public rows were
-the same. Its developer text, lockfile rows and the code lines around the constructed secrets came from the crates
-and Python packages on the machine that built it, and an unseeded Faker drew some of its generated passwords and card
-numbers. A rebuild from this folder, trained once with the same seed, scores as follows. The first number is leaked
-labeled values, the second false-positive characters, both with holdback's rules.
+The model on Hugging Face is this folder's output with the default settings: `data.py constructed`, `data.py
+natural`, then `train.py`. Its model card names the commit and has the results.
 
-| Test | Published model | Rebuilt here |
-| --- | ---: | ---: |
-| PrivacyBench, persona never trained on | 0.8% / 0.6% | 0.6% / 0.5% |
-| PrivacyBench, three more personas | 3.2% / 0.4% | 2.9% / 0.4% |
-| ai4privacy EN validation | 6.0% / 10.8% | 5.4% / 11.2% |
-| CredData, files no earlier sample used | 20.2% / 4.7% | 18.5% / 5.1% |
-| Generated agent tasks (seeds 7 and 11), values leaked of 288 and tasks broken of 186 | 0 and 0; 6 and 6 | 0 and 0; 6 and 6 |
-| Developer text, false replacements per 100 KB (tuning, held-out) | 4, 2 | 5, 2 |
-| Chinese names, MSRA NER test odd rows, 1,301 names | 13.1% / 1.4% | 4.2% / 2.5% |
-| 30 Chinese developer requests, 10 values | 0 of 10 / 0.6% | 0 of 10 / 0.5% |
-
-The two models differ by about as much as two seeds of one recipe, except on Chinese names: the rebuild misses fewer
-of them and takes more common words for names.
+A first upload was trained with the same recipe before the code moved into this repository, with developer text from
+other crates and packages and some generated passwords and card numbers drawn without a seed. On the tests above, the
+rebuild differed from it by about as much as two seeds of one recipe, except on Chinese names in news: it missed 4.2%
+of them instead of 13.1%, and replaced 2.5% of other characters instead of 1.4%.

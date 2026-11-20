@@ -87,6 +87,8 @@ def save(model, tok, out: Path) -> None:
     model.config.label2id = {name: i for i, name in enumerate(LABELS)}
     model.save_pretrained(out)
     tok.save_pretrained(out)
+    spec = json.loads((out / "tokenizer.json").read_text())  # on one line: half the size to download and to read
+    (out / "tokenizer.json").write_text(json.dumps(spec, ensure_ascii=False))
     config = json.loads((out / "tokenizer_config.json").read_text())
     for k in ("is_local", "local_files_only"):  # where this copy was loaded from, not part of the tokenizer
         config.pop(k, None)
