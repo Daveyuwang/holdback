@@ -43,6 +43,9 @@ features; each step ends with a check that a reader can rerun or see.
 | Real use: hook mode in the maintainer's daily work, on 0.2.1, for at least three working days and 200 new values, read from the shapes in `sightings.log` | At most 10% of the saved values wrong; the counts in the README. Above 10%, the largest kinds get rules and a 0.2.2 |
 | An announcement in two or more communities | Posted; each report answered within two days; what came in recorded here two weeks later |
 
+Done: the `ls -l` rule, 0.2.1 (released 2026-11-20, with a rule for pieces of long numbers that the real sessions
+turned up) and the issue forms. Open: real use and the announcement.
+
 After that holdback takes bug fixes from reports. Waiting until someone asks: a wider real-session benchmark
 (other languages, larger tool output, more kinds of tools); training data for French, German, Italian, Spanish and
 Dutch; the teacher's person and email spans on developer text at the next retrain; Homebrew and npm packages.
