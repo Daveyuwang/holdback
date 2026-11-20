@@ -96,6 +96,12 @@ def creddata(n):
     return [excerpt(true, path, cred) for path, cred in spread([(p, c) for p, creds in true.items() for c in creds], n)]
 
 
+def benchmark(key: str, n: int = 400) -> list:
+    """The n rows of one of SETS that the benchmark reads, as [text, labeled spans], kept in bench/results/."""
+    _, query, parse = SETS[key]
+    return cached(f"{key}_{n}", lambda: fetch(query, parse, n))
+
+
 def evaluate(rows, per_row, title):
     leaked = total = fp = outside = 0
     by_type = Counter()
@@ -121,11 +127,11 @@ def main():
     ap.add_argument("--compare", action="store_true")
     ap.add_argument("--sequence", action="store_true", help="also run each set through one placeholder map in order")
     a = ap.parse_args()
-    sets = {key: (title, lambda q=query, p=parse: fetch(q, p, a.n)) for key, (title, query, parse) in SETS.items()}
+    sets = {key: (title, lambda k=key: benchmark(k, a.n)) for key, (title, _, _) in SETS.items()}
     if (RESULTS / "CredData/data").exists():
-        sets["creddata"] = ("CredData", lambda: creddata(a.n))
+        sets["creddata"] = ("CredData", lambda: cached(f"creddata_{a.n}", lambda: creddata(a.n)))
     for key, (title, load) in sets.items():
-        rows = cached(f"{key}_{a.n}", load)
+        rows = load()
         texts, name = [text for text, _ in rows], f"{key}_spans_{a.n}"
         print(f"{title}, {len(rows)} rows")
         for tool, source in COMPARED.items() if a.compare else ():

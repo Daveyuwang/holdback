@@ -73,7 +73,7 @@ Run the checks that cover what changed.
 | --- | --- |
 | `native.rs`, `detect.rs` | `cargo test`; a runtime change must not move benchmark numbers, a change to the windows is checked like a rule change |
 | `student.rs` | `cargo test --release`, then the benchmarks |
-| `distill/` | Rebuild the data and train; then the benchmarks with `HOLDBACK_STUDENT_DIR` set to the new model and `distill/heldout.py`, against the model card's numbers |
+| `distill/` | Rebuild the data and train; then the benchmarks with `HOLDBACK_STUDENT_DIR` set to the new model (`bench/dev_eval.py --authors` among them) and `distill/heldout.py`, against the model card's numbers |
 | `precision.rs` | `bench/detect_eval.py` (also `--seed 11`), `bench/public_eval.py` and `bench/dev_eval.py` (also `--held-out`), for the default detector and with `HOLDBACK_DETECTOR=privacy-filter` |
 | `vault.rs`, the known-values pass | `bench/public_eval.py --sequence`, which runs each set through one map in order |
 | `protocols.rs`, `server.rs` | `bench/check_proxy.py`, then `bench/check_agents.py` with Claude Code and Codex |

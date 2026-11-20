@@ -6,6 +6,9 @@
                not by their names, agent output and secrets as source code writes them; and Chinese documentation
                with the Privacy Filter's spans and planted values -> data/constructed.jsonl
 
+Text taken from real repositories also has the names and emails of the real people in it labeled
+(bench/dev_eval.py's people()), and no row repeats a text that holdback's public benchmark reads.
+
 A row is {"source", "text", "gold": [[start, end, category]]} with character offsets, and "teacher" with the Privacy
 Filter's spans where it labeled the row. The sources: the datasets and repositories in SOURCES at fixed revisions,
 the crates of rust/holdback/Cargo.lock (`cargo vendor`), and the Python packages in python_packages.txt as uv.lock
@@ -29,15 +32,14 @@ HERE = Path(__file__).parent
 DATA = HERE / "data"
 REPO = HERE.parent
 sys.path.insert(0, str(REPO / "bench"))
-from dev_eval import HELD_OUT_CRATES  # noqa: E402
-from public_eval import ATTRIBUTES, entities  # noqa: E402
+from dev_eval import HELD_OUT_CRATES, people  # noqa: E402
+from public_eval import ATTRIBUTES, SETS, benchmark, entities  # noqa: E402
 from real_eval import CRATES  # noqa: E402
 from spans import detector_env, run  # noqa: E402
 
 SOURCES = {
     # (name in the rows, dataset, revision, split, first row, rows). The benchmarks read Nemotron-PII's test split and
-    # four pages of 100 rows of PII Bench ZH; three of those pages (rows 2,000 to 2,099, 4,000 to 4,099 and 6,000 to
-    # 6,099) lie in the rows taken here.
+    # four pages of 100 rows of PII Bench ZH, three of which lie past the first row here; public_rows() skips them.
     "datasets": [("nemotron", "nvidia/Nemotron-PII", "b70ffaf5ff39e079776134c5bf4381f00a9fd1ed", "train", 0, 16000),
                  ("zh", "asgdaudahu/pii-bench-zh", "69a37af094940c4b999599011814283dee9cf123", "train", 1000, 6000)],
     # git object listings for the lockfile rows
@@ -136,15 +138,22 @@ def snippets(rng, per_crate: int, n: int, min_lines: int, most: int) -> list[lis
 
 
 def public_rows():
+    """n rows of each dataset from its first row on, leaving out every text the public benchmark reads."""
     from datasets import load_dataset
+    held = {text for key in SETS for text, _ in benchmark(key)}
     seen = Counter()
     for name, dataset, revision, split, first, n in SOURCES["datasets"]:
         key, labels = ("type", "entities") if name == "zh" else ("label", "spans")
-        for r in load_dataset(dataset, split=split, revision=revision, streaming=True).skip(first).take(n):
+        kept = 0
+        for r in load_dataset(dataset, split=split, revision=revision, streaming=True).skip(first):
+            if kept == n:
+                break
+            if not r["text"].strip() or r["text"] in held:
+                continue
             spans = entities(r[labels], key)
             seen.update(kind for _, _, kind in spans)
-            if r["text"].strip():
-                yield {"source": name, "text": r["text"], "gold": [[s, e, cat] for s, e, kind in spans if (cat := category(kind))]}
+            kept += 1
+            yield {"source": name, "text": r["text"], "gold": [[s, e, cat] for s, e, kind in spans if (cat := category(kind))]}
     print("dataset labels:", dict(seen.most_common()), file=sys.stderr)
 
 
@@ -155,8 +164,9 @@ def category(kind: str) -> str | None:
         return None
     for words, cat in [(("email",), "private_email"), (("phone", "tel", "fax"), "private_phone"), (("birth", "dob"), "private_date"),
                        (("password", "pin", "cvv", "api_key", "token", "secret"), "secret"),
+                       (("mac",), "private_url"),  # before "address", which mac_address also contains
                        (("address", "street", "city", "zip", "postcode", "building", "coordinate"), "private_address"),
-                       (("ip", "mac", "url"), "private_url"), (("name", "person"), "private_person")]:
+                       (("ip", "url"), "private_url"), (("name", "person"), "private_person")]:
         if any(w in k for w in words):
             return cat
     return "account_number"
@@ -790,14 +800,20 @@ def not_a_name(text: str, span: list) -> bool:
     return span[2] == "private_person" and (bool(CJK.search(v)) and (len(v) > 4 or any(c in "，。、；：！？（）《》“”‘’【】" for c in v)) or "/" in v or "." in v)
 
 
+def with_people(row: dict) -> dict:
+    """The row with the real people's names and emails in its text labeled, where no planted value is."""
+    found = [p for p in people(row["text"]) if not any(p[0] < g[1] and g[0] < p[1] for g in row["gold"])]
+    return dict(row, gold=row["gold"] + found)
+
+
 def write(path: Path, rows: list[dict]):
     path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
     print(path.name, dict(Counter(r["source"] for r in rows)))
 
 
 def natural():
-    """data/natural.jsonl: the public rows with the teacher's spans, then the developer text, whose planted values are
-    its only labels. Labeling takes most of the time and resumes where it stopped."""
+    """data/natural.jsonl: the public rows with the teacher's spans, then the developer text, labeled with its planted
+    values and its real people. Labeling takes most of the time and resumes where it stopped."""
     DATA.mkdir(exist_ok=True)
     rows = list(public_rows())
     partial = DATA / "natural.partial.jsonl"
@@ -809,7 +825,7 @@ def natural():
                 out.write(json.dumps(dict(r, teacher=s["detected"]), ensure_ascii=False) + "\n")
             out.flush()
             print(f"teacher labels {i + len(batch)} of {len(rows)}", flush=True)
-    write(DATA / "natural.jsonl", [json.loads(line) for line in open(partial)] + list(dev_rows()))
+    write(DATA / "natural.jsonl", [json.loads(line) for line in open(partial)] + [with_people(r) for r in dev_rows()])
     partial.unlink()
 
 
@@ -817,7 +833,8 @@ def constructed():
     """data/constructed.jsonl. The Chinese documentation's teacher spans are the Privacy Filter's after holdback's
     rules, without person spans that cannot be names; its gold spans are the planted values."""
     DATA.mkdir(exist_ok=True)
-    rows = list(contrast_rows(1500)) + list(agent_rows(2000)) + list(secret_rows(1500)) + list(lock_rows())
+    real = lambda rows: [with_people(r) for r in rows]  # text taken from real repositories
+    rows = real(contrast_rows(1500)) + list(agent_rows(2000)) + real(secret_rows(1500)) + real(lock_rows())
     docs = list(zh_docs_rows())
     for r, s in zip(docs, run([r["text"] for r in docs], env=TEACHER)):
         r["teacher"] = [x for x in s["refined"] if not not_a_name(r["text"], x)]

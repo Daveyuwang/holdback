@@ -152,7 +152,7 @@ HOLDBACK_KEY_ENV=BAILIAN_API_KEY holdback run codex --upstream bailian -m qwen3.
 ## 已知局限
 
 - 在蒸馏模型没有训练过的两个个人信息公开数据集上，holdback 漏掉 0.6%（PrivacyBench）和 5.4%（ai4privacy 英文部分）的标注值。ai4privacy 上漏掉的大多是城市、邮编、用户名和出生日期。它在 [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) 和 Nemotron-PII 上的数字不算留出检验：基准里 400 条 PII Bench ZH 中有 300 条是训练数据，训练也用了 Nemotron-PII 的训练集。
-- 蒸馏模型不会替换 crate 的 `Cargo.toml` 里 `authors` 列表中的姓名和邮箱，因为它的训练文本把这些标成了非隐私内容。`HOLDBACK_DETECTOR=privacy-filter` 能替换其中大部分；两种检测模型都可以用 `holdback replace` 补上姓名。
+- 蒸馏模型不会替换 crate 的 `Cargo.toml` 里 `authors` 列表中的姓名和邮箱，因为它的训练文本把这些标成了非隐私内容。在 `bench/real_eval.py` 用到的九个 crate 的清单里，12 个姓名和 12 个邮箱它一个都没替换，Privacy Filter 替换了 8 个姓名和 11 个邮箱（`bench/dev_eval.py --authors`）。设置 `HOLDBACK_DETECTOR=privacy-filter` 或用 `holdback replace` 可以补上。
 - 在法语、德语、意大利语、西班牙语和荷兰语文本上，蒸馏模型比 Privacy Filter 漏得多：漏掉 11% 到 18% 的标注值，Privacy Filter 是 5% 到 16%，漏的主要是出生日期、门牌号、邮编和证件号（每种语言取 ai4privacy 的 100 行，见 `distill/heldout.py`）。处理这类文本时请设置 `HOLDBACK_DETECTOR=privacy-filter`。韩文、阿拉伯文、印地文等其他文字还没有测过。
 - 在中文文本里，蒸馏模型有时会把普通词当成人名：在新闻文本上误替换了 2.5% 的其他字符，Privacy Filter 是 0.6%（`distill/heldout.py`）。
 - [CredData](https://github.com/Samsung/CredData) 收集的是源码文件里的密钥，holdback 在上面漏掉 30%。其中一半以上是 UUID，holdback 有意保留它们，因为 agent 要拿 UUID 当标识符用。

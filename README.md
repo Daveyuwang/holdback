@@ -201,8 +201,9 @@ are stored in `~/.config/holdback/lists.json`.
   of the benchmark's 400 PII Bench ZH rows were training rows, and the training used Nemotron-PII's training
   split.
 - The distilled model leaves the names and emails in a crate's `Cargo.toml` `authors` list in place, because its
-  training text labeled them as not private. `HOLDBACK_DETECTOR=privacy-filter` replaces most of them, and
-  `holdback replace` adds a name for either detector.
+  training text labeled them as not private. In the manifests of the nine crates `bench/real_eval.py` uses, it
+  replaced none of 12 names and 12 emails, and the Privacy Filter replaced 8 names and 11 emails
+  (`bench/dev_eval.py --authors`). `HOLDBACK_DETECTOR=privacy-filter` or `holdback replace` covers them.
 - In French, German, Italian, Spanish and Dutch the distilled model misses more than the Privacy Filter: 11 to 18%
   of labeled values against 5 to 16%, mostly dates of birth, building numbers, postcodes and ID numbers (100 rows
   of ai4privacy per language, `distill/heldout.py`). For such text, set `HOLDBACK_DETECTOR=privacy-filter`. Other
