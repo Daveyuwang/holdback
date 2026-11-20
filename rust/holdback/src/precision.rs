@@ -152,17 +152,19 @@ fn enclosing_name(text: &str, start: usize, end: usize) -> &str {
 /// The agents themselves. Alone, the name is the assistant; "Claude Dubois" is still a person.
 const AGENT_NAMES: &[&str] = &["claude", "codex"];
 
-/// Whether a span lies in the name of a command-line option, such as `bel` in `usage: cat [-belnstuv]`. The value
-/// after `=` is not part of the name: `--author=maria` keeps `maria` a candidate.
-fn in_option(text: &str, start: usize, end: usize) -> bool {
+/// The name of the command-line option a span lies in, without its dashes: `belnstuv` for `bel` in
+/// `usage: cat [-belnstuv]`. The value after `=` is not part of the name: `--author=maria` keeps `maria` a candidate.
+fn option_name(text: &str, start: usize, end: usize) -> Option<&str> {
     if text[start..end].contains(char::is_whitespace) {
-        return false;
+        return None;
     }
     let from = text[..start].rfind(char::is_whitespace).map_or(0, |i| i + 1);
     let to = text[end..].find(char::is_whitespace).map_or(text.len(), |i| end + i);
     let token = text[from..to].trim_start_matches(['[', '(', '"', '\'', '`']);
-    let name_end = to - token.len() + token.find('=').unwrap_or(token.len());
-    token.starts_with('-') && token.trim_start_matches('-').starts_with(|c: char| c.is_ascii_alphabetic()) && end <= name_end
+    let name = &token[..token.find('=').unwrap_or(token.len())];
+    let bare = name.trim_start_matches('-').trim_end_matches([']', ')', '"', '\'', '`', ',', ';']);
+    let in_name = end <= to - token.len() + name.len();
+    (name.starts_with('-') && bare.starts_with(|c: char| c.is_ascii_alphabetic()) && in_name).then_some(bare)
 }
 /// `plugin:skill`, `image:tag`, `package:target`: lowercase names joined by a colon, with a hyphen or underscore
 /// somewhere. A person found inside one is an identifier, unless a field name comes before the colon (`user:`).
@@ -348,7 +350,12 @@ pub fn refine(text: &str, spans: &[Span]) -> Vec<Span> {
         if sp.label == "private_person" && is_name(value) && value.contains(|c: char| c.is_ascii_digit()) && value.split(['-', '_', '.']).count() >= 3 {
             continue;
         }
-        if matches!(sp.label.as_str(), "private_person" | "private_address") && in_option(text, sp.start, sp.end) {
+        let option = option_name(text, sp.start, sp.end);
+        if matches!(sp.label.as_str(), "private_person" | "private_address") && option.is_some() {
+            continue;
+        }
+        // a short cluster of flags is not a secret: `fsS` in `curl -fsS`; `-pS3cret` may still hold a password
+        if sp.label == "secret" && !named_secret && option.is_some_and(|o| o.len() <= 5 && o.chars().all(|c| c.is_ascii_alphabetic())) {
             continue;
         }
         // shell syntax is not a secret: `&& cat` in `ls -la && cat -A notes.txt`
@@ -433,6 +440,8 @@ mod tests {
         assert!(!replaced(lock, "bytemuck_derive", "private_person"));
         assert!(!replaced("-rwxr-xr-x  1 root  wheel  196320 Aug 12 21:51 bputil", "bputil", "private_person"));
         assert!(!replaced("const SWIGLU_ALPHA: f32 = 1.702;", "SWIGLU_ALPHA", "private_person"));
+        assert!(!replaced("curl -sSL https://example.com/install.sh", "sSL", "secret"));
+        assert!(replaced("mysql -uroot -pS3cr3tPa55 orders", "pS3cr3tPa55", "secret"));
         assert!(replaced("good call <@U02LIZ_MARCHETTI>, thanks", "U02LIZ_MARCHETTI", "private_person"));
         assert!(super::refine("tiktoken-rs = \"0.12.1\"\nmax_tokens = 100000\ntokenizer = \"o200k_base\"", &[]).is_empty());
         assert_eq!(super::refine("auth_token = \"hunter2hunter2\"\n\"accessToken\": \"hunter2hunter2\"\nGITHUB_TOKEN=hunter2hunter2", &[]).len(), 3);
@@ -523,6 +532,7 @@ mod tests {
                 &["Priya Raman", "priya.raman@proton.me"],
             ),
             ("Passport AB-1234567, account 6222020200112345678.", &[], &["AB-1234567", "6222020200112345678"]),
+            ("*/15 * * * * curl -fsS https://hc-ping.com/check", &["curl -fsS"], &[]),
             (
                 // the made-up key is written in two parts so that secret scanners do not take it for a real one
                 concat!("DATABASE_URL=postgres://app_admin:S3cr3t-Pa55w0rd!@db.internal.acme.io:5432/orders\nSTRIPE_SECRET_KEY=sk_", "live_51HxQ2bEXAMPLEq7Wm3Tn8Vy\n"),

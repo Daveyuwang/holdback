@@ -24,13 +24,11 @@ values back, so `welcome.txt` and the answer on screen have them.
 
 Masking every detected value breaks agents. The benchmark has 186 tasks in which the answer depends on a
 non-private value next to a private one: a port in a connection string, a date inside an order number, a URL
-path. On DeepSeek, Claude Haiku and Qwen, task success was 99.5 to 100% with raw text. Replacing what the
-detector found with `<REDACTED>` dropped it to 56 to 57%. Numbered placeholders restored in the reply raised it
-to 72 to 86%. With holdback's rules, which keep hosts, ports, paths, dates and IDs and replace only the secret
-part, it reached 98 to 100%. These runs used the Privacy Filter, holdback's detector before version 0.2; the
-distilled model that replaced it changes the same share of needed values on these tasks. [Benchmark](#benchmark)
-has the full tables and the commands to rerun them, and the [technical report](docs/report.md) the design behind
-them and where holdback loses.
+path. On DeepSeek, Claude Haiku and Qwen, task success was 99.5% with raw text. Replacing what the detector
+found with `<REDACTED>` dropped it to 78 to 80%. Numbered placeholders restored in the reply raised it to 88 to
+90%. With holdback's rules, which keep hosts, ports, paths, dates and IDs and replace only the secret part, it
+reached 100% on all three. [Benchmark](#benchmark) has the full tables and the commands to rerun them, and the
+[technical report](docs/report.md) the design behind them and where holdback loses.
 
 ## Install
 
@@ -165,6 +163,7 @@ passes through to the upstream unchanged.
 - **Stable placeholders:** a value keeps its placeholder while the proxy runs, so the history an agent resends
   is identical every turn and prompt caching keeps working.
 - **One system line** tells the model that placeholders stand for real values and must be used as written.
+  Some models still drop the brackets (`PRIVATE_PERSON_1`); holdback restores that form too.
 - **Fail closed:** if holdback cannot redact a request, it does not send it.
 - **Thinking blocks** pass through untouched, because providers sign them.
 
@@ -245,14 +244,11 @@ uv run python bench/task_eval.py --runs 1        # task success under five condi
 | Same, fresh instances (`--seed 11`) | 0.0% | 3.2% |
 | Privacy Filter plus holdback's rules | 0.3% | 3.2% |
 
-The task runs below used the Privacy Filter, the default detector before version 0.2. They have not been
-repeated with the distilled model, which replaces the same share of needed values on these tasks.
-
-| Task success, one run, with the Privacy Filter | Raw | `<REDACTED>` | Placeholders | holdback | Only true secrets replaced |
+| Task success, one run | Raw | `<REDACTED>` | Placeholders | holdback | Only true secrets replaced |
 | --- | --- | --- | --- | --- | --- |
-| DeepSeek (deepseek-flash) | 100.0% | 55.9% | 71.5% | 99.5% | 99.5% |
-| Claude (claude-haiku-5-5) | 99.5% | 57.0% | 85.5% | 100.0% | 100.0% |
-| Qwen (qwen3.8-flash) | 100.0% | 55.9% | 75.3% | 97.8% | 100.0% |
+| DeepSeek (deepseek-flash) | 99.5% | 78.5% | 89.8% | 100.0% | 99.5% |
+| Claude (claude-haiku-5-5) | 99.5% | 80.1% | 90.3% | 100.0% | 100.0% |
+| Qwen (qwen3.8-flash) | 99.5% | 79.0% | 87.6% | 100.0% | 100.0% |
 
 The rules were tuned on these 37 templates, so the generated-text numbers are optimistic; the public sets are
 the held-out check. On the 36 tasks that need the private value itself, every redacting condition stays between
@@ -264,7 +260,7 @@ commands), with made-up names, emails and keys planted at known places.
 
 | Developer output | False replacements per 100 KB | Planted values leaked |
 | --- | --- | --- |
-| Tuning corpus, detector alone | 13 | 0 of 39 |
+| Tuning corpus, detector alone | 12 | 0 of 39 |
 | Tuning corpus, with holdback's rules | 2 | 0 of 39 |
 | Held-out corpus, detector alone | 31 | 0 of 45 |
 | Held-out corpus, with holdback's rules | 2 | 0 of 45 |
@@ -338,11 +334,11 @@ their own, such as dates, occupation, country and organization, are not counted.
 The distilled model trained on other rows of PII Bench ZH and on Nemotron-PII's training split, so those two
 columns are not held out for it.
 
-| Task success, one run, 186 tasks | Raw | Codex patterns | Presidio | rehydra | holdback with the Privacy Filter |
+| Task success, one run, 186 tasks | Raw | Codex patterns | Presidio | rehydra | holdback |
 | --- | --- | --- | --- | --- | --- |
-| DeepSeek (deepseek-flash) | 100.0% | 99.5% | 41.9% | 68.3% | 99.5% |
-| Claude (claude-haiku-5-5) | 99.5% | 99.5% | 44.1% | 84.4% | 100.0% |
-| Qwen (qwen3.8-flash) | 100.0% | 99.5% | 41.9% | 77.4% | 97.8% |
+| DeepSeek (deepseek-flash) | 99.5% | 99.5% | 41.9% | 67.2% | 100.0% |
+| Claude (claude-haiku-5-5) | 99.5% | 100.0% | 44.1% | 84.4% | 100.0% |
+| Qwen (qwen3.8-flash) | 99.5% | 98.9% | 42.5% | 72.6% | 100.0% |
 
 The Codex patterns keep tasks working because they leave 92% of the private values in place. Presidio and
 rehydra replace whole connection strings, URLs and dates, which removes the port, path or date a task needs.

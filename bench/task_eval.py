@@ -54,6 +54,14 @@ def oracle(ctx, secrets):
     return ctx, mapping
 
 
+def restored(answer, mapping):
+    for key, val in mapping.items():
+        answer = answer.replace(key, val)
+        if key.startswith("["):  # as holdback does, also a placeholder that the model wrote without its brackets
+            answer = re.sub(rf"(?<![\w\[]){re.escape(key[1:-1])}(?![\w\]])", lambda _: val, answer)
+    return answer
+
+
 def correct(answer, need):
     return all(re.search(rf"(?<!\d){re.escape(n)}(?!\d)", answer) if n.isdigit() else n.lower() in answer.lower() for n in need)
 
@@ -99,7 +107,8 @@ def main():
     if log.exists():
         for line in log.read_text().splitlines():
             d = json.loads(line)
-            if sig.get((d["i"], d["cond"])) == d.get("sig"):
+            if sig.get((d["i"], d["cond"])) == d.get("sig"):  # scored again, in case the restore changed
+                d["ok"] = correct(restored(d["answer"], prompts[d["i"], d["cond"]][1]), tasks[d["i"]].need)
                 done[d["i"], d["model"], d["cond"], d["run"]] = d
     jobs = [(i, m, c, k) for k in range(a.runs) for m in models for c in conds for i in range(len(tasks)) if (i, m, c, k) not in done]
     ask = asker()
@@ -114,8 +123,7 @@ def main():
             except Exception as e:  # rate limits and transient errors
                 answer = f"__ERROR__ {type(e).__name__}"
                 time.sleep(2 ** attempt * 2)
-        for key, val in mapping.items():
-            answer = answer.replace(key, val)
+        answer = restored(answer, mapping)
         return {"i": i, "model": m, "cond": c, "run": k, "sig": sig[i, c], "answer": answer[:400], "ok": correct(answer, tasks[i].need)}
 
     print(f"{len(jobs)} model calls", flush=True)

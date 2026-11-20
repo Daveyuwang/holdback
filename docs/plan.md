@@ -25,8 +25,6 @@ What the release rests on:
 - In Chinese it sometimes takes a common word for a name.
 - Names in developer text that `people()` does not recognize, such as a lone first name or a handle without an
   email, train as not private, so the model keeps them.
-- Task success under redaction was last measured with the Privacy Filter; it needs a rerun with the distilled
-  model, which calls model APIs.
 - Hook mode does not cover the system prompt, what the user types, or the output of a failed tool call.
 - The real-session benchmark is narrow: short tasks on Rust crates.
 - Codex is checked through an OpenAI-compatible provider, not with GPT models.
@@ -44,7 +42,8 @@ No new features. Each step ends with a check that a reader can rerun or see.
 | A technical report: the placeholder design, the distillation, the runtime, the evaluation and where holdback loses | Linked from the README |
 | An announcement | Three reports from people outside the project: issues, questions or pull requests |
 
-Done: the rules, the demo and the report. Open: the task-success rerun, the week of real use and the announcement.
+Done: the rules, the demo, the report and the task-success rerun (100% on all three models). Open: the week of
+real use and the announcement.
 
 After 0.3, as reports ask for them: widen the real-session benchmark (other languages, larger tool output, more
 kinds of tools); at the next retrain, label the developer text with the teacher's person and email spans as well as

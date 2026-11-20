@@ -7,13 +7,13 @@ Technical report for holdback 0.2. Every number comes from a script in this repo
 Coding agents send what they read to cloud models: source files, logs, configuration, exported customer data.
 Keeping an agent away from secret files works until a task needs a file's content, and masking the private values
 in that content breaks the task. On 186 agent tasks whose answers depend on text next to a private value,
-replacing every detected value with `<REDACTED>` cut task success from 99.5 to 100% down to 56 to 57%. The tasks
+replacing every detected value with `<REDACTED>` cut task success from 99.5% down to 78 to 80%. The tasks
 rarely need the private value itself. They need the port beside a password, the date inside an order number, the
 path around a user name.
 
 holdback therefore replaces only the private part of a value, with a numbered placeholder that stays the same for a
 session, keeps the structure around it with rules, and puts the real values back in the model's reply and tool
-calls. With these rules, task success returned to 98 to 100% on three models, measured with the original detector.
+calls. With these rules, task success returned to 100% on three models.
 holdback runs as a local proxy or as Claude Code hooks. Its detector is a 28M-parameter model distilled from OpenAI's 1.5B-parameter Privacy Filter: it
 handles a request 6 to 7 times faster, idles at about 40 MB of memory, and misses fewer values on held-out English
 and Chinese data than the model it learned from.
@@ -43,7 +43,9 @@ its placeholder for the life of the process, so the history an agent resends is 
 caching keeps working. Once a value is known, holdback replaces it wherever it appears, also where the detector
 misses it. In the reply, including streamed text and tool-call arguments, holdback puts the real values back, so
 the agent's files and commands get the real values. One system line tells the model that placeholders stand for
-real values and must be used as written. Signed thinking blocks pass through untouched.
+real values and must be used as written. Qwen still answered "Name only" questions with `PRIVATE_PERSON_1`, without
+the brackets, so holdback restores that form too when the name is one it gave out. Signed thinking blocks pass
+through untouched.
 
 **Structure rules.** The detector finds candidate spans; rules in `precision.rs` decide what is replaced. They keep
 what an agent needs and what identifies no one: hosts, ports, paths, dates, versions, UUIDs, commit hashes, private
@@ -107,12 +109,12 @@ held-out checks.
 
 | Model | Raw text | `<REDACTED>` | Numbered placeholders | holdback | Only true secrets replaced |
 | --- | --- | --- | --- | --- | --- |
-| DeepSeek (deepseek-flash) | 100.0% | 55.9% | 71.5% | 99.5% | 99.5% |
-| Claude (claude-haiku-5-5) | 99.5% | 57.0% | 85.5% | 100.0% | 100.0% |
-| Qwen (qwen3.8-flash) | 100.0% | 55.9% | 75.3% | 97.8% | 100.0% |
+| DeepSeek (deepseek-flash) | 99.5% | 78.5% | 89.8% | 100.0% | 99.5% |
+| Claude (claude-haiku-5-5) | 99.5% | 80.1% | 90.3% | 100.0% | 100.0% |
+| Qwen (qwen3.8-flash) | 99.5% | 79.0% | 87.6% | 100.0% | 100.0% |
 
-These runs used the Privacy Filter as detector. The distilled model, with the same rules, replaces the same share of
-needed values on these tasks (3.2%) and leaks none of their 288 private values.
+On the same tasks holdback replaces 3.2% of the needed values and leaks none of the 288 private values. A model
+writes the placeholder it was given, and holdback puts the real value back.
 
 **Detection on public data.** Leaked labeled values, then false-positive characters, on 400 rows per set:
 

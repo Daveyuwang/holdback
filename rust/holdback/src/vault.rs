@@ -13,9 +13,11 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 use std::sync::LazyLock;
 
-pub static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[[A-Z][A-Z_]*_\d+\]").unwrap());
+/// A placeholder, also as some models write it without its brackets: `PRIVATE_PERSON_1`.
+static PLACEHOLDER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[[A-Z][A-Z_]*_\d+\]|(?<![\w\[])[A-Z][A-Z_]*_\d+(?![\w\]])").unwrap());
 static WHOLE_PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[[A-Z][A-Z_]*_\d+\]$").unwrap());
-static TAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[[A-Z0-9_]{0,48}$").unwrap());
+static TAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[[A-Z0-9_]{0,48}$|(?<![\w\[])[A-Z][A-Z0-9_]{0,47}$").unwrap());
 const CACHE_LIMIT: usize = 4096;
 
 /// What `holdback review` shows for one replaced value.
@@ -274,19 +276,21 @@ impl Vault {
 
     /// Put original values back. `json_escaped` when the text sits inside a JSON string literal.
     pub fn restore(&self, text: &str, json_escaped: bool) -> String {
-        if !text.contains('[') {
+        if !text.contains('_') {
             return text.to_string();
         }
         let (mut out, mut last) = (String::with_capacity(text.len()), 0);
         for m in PLACEHOLDER.find_iter(text).flatten() {
             out.push_str(&text[last..m.start()]);
-            match self.to_val.get(m.as_str()) {
+            let found = m.as_str();
+            let key = if found.starts_with('[') { found.to_string() } else { format!("[{found}]") };
+            match self.to_val.get(&key) {
                 Some(v) if json_escaped => {
                     let quoted = serde_json::to_string(v).unwrap();
                     out.push_str(&quoted[1..quoted.len() - 1]);
                 }
                 Some(v) => out.push_str(v),
-                None => out.push_str(m.as_str()),
+                None => out.push_str(found),
             }
             last = m.end();
         }
@@ -347,5 +351,27 @@ impl StreamRestorer {
     pub fn flush(&mut self, vault: &Vault) -> String {
         let ready = std::mem::take(&mut self.buf);
         vault.restore(&ready, self.json_escaped)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StreamRestorer, Vault};
+    use crate::models::DISTILLED;
+
+    /// Some models write a placeholder without its brackets, and a stream may cut one anywhere.
+    #[test]
+    fn restores_placeholders_without_brackets() {
+        let mut vault = Vault::new(DISTILLED.open(&DISTILLED.dir()).unwrap());
+        let ph = vault.placeholder("the value", "private_person");
+        let bare = ph.trim_matches(['[', ']']);
+        let other = format!("not X{bare}, {bare}5 or {bare}_A");
+        assert_eq!(vault.restore(&format!("{ph} and {bare}, {other}"), false), format!("the value and the value, {other}"));
+        let text = format!("Ask {bare}. Then {ph}.");
+        for cut in 0..=text.len() {
+            let mut stream = StreamRestorer::new(false);
+            let out = stream.feed(&text[..cut], &vault) + &stream.feed(&text[cut..], &vault) + &stream.flush(&vault);
+            assert_eq!(out, "Ask the value. Then the value.", "cut at {cut}");
+        }
     }
 }

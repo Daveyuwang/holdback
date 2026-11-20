@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Numbers that stand alone, such as counts and process ids, are kept, and so are shell syntax, command-line
+  options and the header of a CSV file. A placeholder no longer takes a line break with it, so a CSV row is no
+  longer merged into the header above it.
+- A placeholder that a model writes without its brackets, such as `PRIVATE_PERSON_1`, is restored too.
+
 ## 0.2.0
 
 - holdback's default detector is now a distilled model of 28M parameters, trained on public data to label what
