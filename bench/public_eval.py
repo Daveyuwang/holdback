@@ -63,25 +63,37 @@ def fetch(query, parse, n):
     return [parse(x["row"]) for i in range(n // 100) for x in page(i * step)["rows"]]
 
 
-def creddata(n, around=10):
-    """n true credentials spread evenly over CredData, each with the `around` lines before and after it."""
-    root = RESULTS / "CredData"
-    true = {}  # file -> its true credentials as (first line, start in it, last line, end in it, category), 0-based
+def credentials() -> dict:
+    """CredData's true credentials: file -> [(first line, start in it, last line, end in it, category, repository)],
+    lines 0-based."""
+    root, true = RESULTS / "CredData", {}
     for meta in sorted(root.glob("meta/*.csv")):
         for r in csv.DictReader(meta.open(encoding="utf-8")):
             if r["GroundTruth"] == "T" and r["ValueStart"] and r["ValueEnd"] and (root / r["FilePath"]).exists():
-                true.setdefault(r["FilePath"], []).append((int(r["LineStart"]) - 1, int(r["ValueStart"]), int(r["LineEnd"]) - 1, int(r["ValueEnd"]), r["Category"]))
-    every = [(path, cred) for path, creds in true.items() for cred in creds]
-    rows = []
-    for path, (first, _, last, _, _) in every[:: len(every) // n][:n]:
-        lines = (root / path).read_text(encoding="utf-8", errors="replace").split("\n")
-        top, bottom = max(0, first - around), min(len(lines), last + around + 1)
-        at = {top: 0}  # line number -> offset of its first character in the excerpt
-        for i in range(top, bottom):
-            at[i + 1] = at[i] + len(lines[i]) + 1
-        rows.append(["\n".join(lines[top:bottom]),
-                     [[at[a] + s, at[b] + e, kind] for a, s, b, e, kind in true[path] if top <= a and b < bottom]])
-    return rows
+                true.setdefault(r["FilePath"], []).append((int(r["LineStart"]) - 1, int(r["ValueStart"]), int(r["LineEnd"]) - 1,
+                                                           int(r["ValueEnd"]), r["Category"], r["RepoName"]))
+    return true
+
+
+def spread(items: list, n: int) -> list:
+    """n items spread evenly over the list."""
+    return items[:: max(1, len(items) // n)][:n]
+
+
+def excerpt(true: dict, path: str, cred: tuple, around: int = 10) -> list:
+    """The credential's lines with `around` lines before and after, and every true credential inside them."""
+    lines = (RESULTS / "CredData" / path).read_text(encoding="utf-8", errors="replace").split("\n")
+    top, bottom = max(0, cred[0] - around), min(len(lines), cred[2] + around + 1)
+    at = {top: 0}  # line number -> offset of its first character in the excerpt
+    for i in range(top, bottom):
+        at[i + 1] = at[i] + len(lines[i]) + 1
+    return ["\n".join(lines[top:bottom]), [[at[a] + s, at[b] + e, kind] for a, s, b, e, kind, _ in true[path] if top <= a and b < bottom]]
+
+
+def creddata(n):
+    """n true credentials spread evenly over CredData, each with ten lines of code on either side."""
+    true = credentials()
+    return [excerpt(true, path, cred) for path, cred in spread([(p, c) for p, creds in true.items() for c in creds], n)]
 
 
 def evaluate(rows, per_row, title):

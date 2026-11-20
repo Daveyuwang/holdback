@@ -4,9 +4,12 @@ Conditions per task: raw | redacted (detector spans -> <REDACTED>) | placeholder
 placeholders, restored in the answer) | refined (holdback's spans, restored) | oracle (only the true private values).
 The compared tools in spans.py are conditions too: codex (its mask), presidio (numbered tags, not restored) and
 rehydra (its tags, restored).
+Answers are kept in bench/results/answers.jsonl with a digest of the prompt they answer, so after a change of
+detector or rules only the prompts that changed are sent again.
 Needs DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, BAILIAN_API_KEY and BAILIAN_BASE_URL.
 Usage: uv run python bench/task_eval.py [--runs 3] [--models deepseek,claude,qwen] [--conds raw,codex,presidio,rehydra,refined]"""
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -89,13 +92,15 @@ def main():
     for i, t in enumerate(tasks):
         for c in conds:
             prompts[i, c] = (t.ctx, {}) if c == "raw" else oracle(t.ctx, t.secrets) if c == "oracle" else replace(t.ctx, found[c][i], c)
+    sig = {(i, c): hashlib.sha256(f"{sent}\n\n{tasks[i].q}".encode()).hexdigest()[:16] for (i, c), (sent, _) in prompts.items()}
 
     log = RESULTS / "answers.jsonl"
-    done = {}
+    done = {}  # answers to the prompts of this run only
     if log.exists():
         for line in log.read_text().splitlines():
             d = json.loads(line)
-            done[d["i"], d["model"], d["cond"], d["run"]] = d
+            if sig.get((d["i"], d["cond"])) == d.get("sig"):
+                done[d["i"], d["model"], d["cond"], d["run"]] = d
     jobs = [(i, m, c, k) for k in range(a.runs) for m in models for c in conds for i in range(len(tasks)) if (i, m, c, k) not in done]
     ask = asker()
 
@@ -111,7 +116,7 @@ def main():
                 time.sleep(2 ** attempt * 2)
         for key, val in mapping.items():
             answer = answer.replace(key, val)
-        return {"i": i, "model": m, "cond": c, "run": k, "answer": answer[:400], "ok": correct(answer, tasks[i].need)}
+        return {"i": i, "model": m, "cond": c, "run": k, "sig": sig[i, c], "answer": answer[:400], "ok": correct(answer, tasks[i].need)}
 
     print(f"{len(jobs)} model calls", flush=True)
     with ThreadPoolExecutor(a.workers) as ex, log.open("a") as f:

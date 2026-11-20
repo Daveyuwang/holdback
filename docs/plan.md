@@ -9,12 +9,12 @@ back. The README has the measurements and the limits.
 
 What the release rests on:
 
-- 0 to 5% of labeled personal values missed on public sets, against 10 to 14% with the Privacy Filter, and no
-  value leaked on the generated agent tasks.
+- 0.6% and 5.4% of labeled personal values missed on the two public sets the distilled model never trained on,
+  against 9.7% and 12.7% with the Privacy Filter, and no value leaked on the generated agent tasks.
 - 44 to 45 of 45 real agent tasks pass with hook mode on, the same as with it off, on Haiku 5.5, Sonnet 5.5 and
   Opus 5.5, and no planted value appears in any recorded request.
 - 2 to 4 false replacements per 100 KB of developer output.
-- A request takes 5 to 7 times less time than with the Privacy Filter, and the model is a 115 MB download.
+- A request is 6 to 7 times faster than with the Privacy Filter, and the model is a 115 MB download.
 - Binaries for macOS and Linux, built and checked on clean machines by the release workflow.
 
 ## Known gaps
@@ -22,6 +22,8 @@ What the release rests on:
 - In French, German, Italian, Spanish and Dutch the distilled model misses 11 to 18% of labeled values, where the
   Privacy Filter misses 5 to 16%; other scripts are untested.
 - In Chinese it sometimes takes a common word for a name.
+- It leaves the maintainers' names and emails in `Cargo.toml` `authors` lists in place, and its PII Bench ZH
+  numbers are not held out. Both come from faults in its training data, listed in `distill/README.md`.
 - Task success under redaction was last measured with the Privacy Filter; it needs a rerun with the distilled
   model, which calls model APIs.
 - Hook mode does not cover the system prompt, what the user types, or the output of a failed tool call.
@@ -30,8 +32,9 @@ What the release rests on:
 
 ## Next
 
-1. Rerun the task-success benchmark with the distilled model.
-2. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
-3. Homebrew and npm packages, when asked for.
+1. Retrain the distilled model with those training-data faults fixed.
+2. Rerun the task-success benchmark with the distilled model.
+3. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
+4. Homebrew and npm packages, when asked for.
 
 Reports of wrong replacements are welcome. `holdback review --masked` output is safe to attach to an issue.

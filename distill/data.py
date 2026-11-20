@@ -1,19 +1,18 @@
-"""Training data for holdback's distilled detector, from public sources at fixed versions. None of it overlaps the
-rows holdback's benchmarks read.
+"""Training data for holdback's distilled detector, from public sources at fixed versions.
 
   natural      Nemotron-PII and PII Bench ZH rows with their dataset labels and the Privacy Filter's spans, and
                developer text with planted values -> data/natural.jsonl
   constructed  rows with exact labels: hash-heavy lockfile text, code where values of the same shape are secrets or
-               not by their names, agent output, secrets as source code writes them, and Chinese documentation with
-               planted values -> data/constructed.jsonl
+               not by their names, agent output and secrets as source code writes them; and Chinese documentation
+               with the Privacy Filter's spans and planted values -> data/constructed.jsonl
 
-A row is {"source", "text", "gold": [[start, end, category]], "teacher": [...]} with character offsets. The sources:
-the datasets and repositories in SOURCES at fixed revisions, the crates of rust/holdback/Cargo.lock (`cargo vendor`)
-and the Python packages of this environment (uv.lock). The Privacy Filter's spans come from the release binary
-(`cargo build --release` in rust/holdback), which downloads its model on first use.
+A row is {"source", "text", "gold": [[start, end, category]]} with character offsets, and "teacher" with the Privacy
+Filter's spans where it labeled the row. The sources: the datasets and repositories in SOURCES at fixed revisions,
+the crates of rust/holdback/Cargo.lock (`cargo vendor`), and the Python packages in python_packages.txt as uv.lock
+pins them, which `uv sync --group distill --group compare` installs. The Privacy Filter's spans come from the
+release binary (`cargo build --release` in rust/holdback), which downloads its model on first use.
 
 Usage: uv run --group distill python distill/data.py natural | constructed"""
-import ast
 import glob
 import hashlib
 import json
@@ -23,17 +22,22 @@ import re
 import subprocess
 import sys
 import sysconfig
-import tempfile
 from collections import Counter
 from pathlib import Path
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
 REPO = HERE.parent
-BINARY = os.environ.get("HOLDBACK_BIN", str(REPO / "rust/holdback/target/release/holdback"))
+sys.path.insert(0, str(REPO / "bench"))
+from dev_eval import HELD_OUT_CRATES  # noqa: E402
+from public_eval import ATTRIBUTES, entities  # noqa: E402
+from real_eval import CRATES  # noqa: E402
+from spans import detector_env, run  # noqa: E402
+
 SOURCES = {
-    # (name in the rows, dataset, revision, split, first row, rows). The benchmarks read Nemotron-PII's test split
-    # and rows 0 to 399 of PII Bench ZH.
+    # (name in the rows, dataset, revision, split, first row, rows). The benchmarks read Nemotron-PII's test split and
+    # four pages of 100 rows of PII Bench ZH; three of those pages (rows 2,000 to 2,099, 4,000 to 4,099 and 6,000 to
+    # 6,099) lie in the rows taken here.
     "datasets": [("nemotron", "nvidia/Nemotron-PII", "b70ffaf5ff39e079776134c5bf4381f00a9fd1ed", "train", 0, 16000),
                  ("zh", "asgdaudahu/pii-bench-zh", "69a37af094940c4b999599011814283dee9cf123", "train", 1000, 6000)],
     # git object listings for the lockfile rows
@@ -47,16 +51,22 @@ SOURCES = {
                 "vant": ("https://github.com/youzan/vant", "7cc499279866e74b117593abf612567d5a2eb28d")},
 }
 ZH_DOCS_FILES = ["*.zh-CN.md", "docs/docs/**/*.md", "!*.en-US.md"]
-SKIP = {"date", "time", "date_time", "occupation", "company_name", "url", "country", "county", "state", "race_ethnicity", "religious_belief",
-        "employment_status", "gender", "age", "education_level", "political_view", "blood_type", "sexuality", "language", "organization",
-        "title", "sex"}
-EVAL_CRATES = {"memmap2", "bytes", "anyhow", "fancy-regex", "gemm", "tiktoken-rs", "bit-set", "itoa", "memchr"}  # dev_eval and real_eval read these
+SKIP = {a.lower() for a in ATTRIBUTES} | {"title", "sex"}  # the labels the benchmarks do not count, and two more
+EVAL_CRATES = set(CRATES) | set(HELD_OUT_CRATES)  # the crates holdback's benchmarks read
 CHUNK = 4000
 DEV_ROWS = 2000
+CJK = re.compile(r"[\u4e00-\u9fff]")
+TEACHER = detector_env("privacy-filter")
 
 
-def checkout(url: str, commit: str, path: Path, files: list[str] | None = None) -> Path:
-    """One commit of a repository, without history; with `files`, only the files those patterns match."""
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:12]
+
+
+def checkout(name: str, url: str, commit: str, parent: Path, files: list[str] | None = None) -> Path:
+    """One commit of a repository, without history; with `files`, only the files those patterns match. The folder's
+    name holds the commit and the patterns, so a new pin gets a new folder."""
+    path = parent / f"{name}-{commit[:12]}" if not files else parent / f"{name}-{commit[:12]}-{digest(json.dumps(files).encode())}"
     if not path.exists():
         tmp = path.with_name(path.name + ".partial")
         subprocess.run(["rm", "-rf", str(tmp)], check=True)
@@ -73,24 +83,56 @@ def checkout(url: str, commit: str, path: Path, files: list[str] | None = None) 
 
 
 def crates() -> list[Path]:
-    """The published source of every crate in rust/holdback/Cargo.lock, except the ones holdback's benchmarks read."""
-    vendor = DATA / "crates"
+    """The published source of every crate in rust/holdback/Cargo.lock, except the ones holdback's benchmarks read,
+    in a folder named after the lock file's digest."""
+    lock = REPO / "rust/holdback/Cargo.lock"
+    vendor = DATA / f"crates-{digest(lock.read_bytes())}"
     if not vendor.exists():
-        tmp = DATA / "crates.partial"
+        tmp = vendor.with_name(vendor.name + ".partial")
         subprocess.run(["rm", "-rf", str(tmp)], check=True)
-        subprocess.run(["cargo", "vendor", "--locked", "--versioned-dirs", "--manifest-path", str(REPO / "rust/holdback/Cargo.toml"), str(tmp)],
+        subprocess.run(["cargo", "vendor", "--locked", "--versioned-dirs", "--manifest-path", str(lock.with_name("Cargo.toml")), str(tmp)],
                        check=True, capture_output=True)
         tmp.rename(vendor)
     return [d for d in sorted(vendor.iterdir()) if d.is_dir() and d.name.rsplit("-", 1)[0] not in EVAL_CRATES]
 
 
-def spans(texts: list[str]) -> list[dict]:
-    """The Privacy Filter's spans for each text: "detected" alone, "refined" after holdback's rules."""
-    env = {k: v for k, v in os.environ.items() if k != "HOLDBACK_STUDENT_DIR"} | {"HOLDBACK_DETECTOR": "privacy-filter"}  # the teacher
-    with tempfile.TemporaryDirectory() as d:
-        batch = Path(d) / "batch.json"
-        batch.write_text(json.dumps({"texts": texts}))
-        return json.loads(subprocess.run([BINARY, "spans", str(batch)], env=env, capture_output=True, text=True, check=True).stdout)
+def python_files() -> list[str]:
+    """The top-level .py files of the packages in python_packages.txt, the packages the published model's developer
+    text came from."""
+    purelib = Path(sysconfig.get_paths()["purelib"])
+    packages = (HERE / "python_packages.txt").read_text().split()
+    if absent := [p for p in packages if not (purelib / p).is_dir()]:
+        sys.exit(f"not installed: {', '.join(absent)}; run `uv sync --group distill --group compare` first")
+    return sorted(f for p in packages for f in glob.glob(f"{purelib}/{p}/*.py"))
+
+
+def fakers(rng, locales):
+    """Faker instances seeded from `rng`, one per locale."""
+    from faker import Faker
+    out = [Faker(loc) for loc in locales]
+    for f in out:
+        f.seed_instance(rng.randint(0, 10**9))
+    return out
+
+
+def chunked(parts: list[str], rng) -> list[str]:
+    """The parts cut into chunks of CHUNK characters, the short ones dropped, in random order."""
+    chunks = [p[i:i + CHUNK] for p in parts for i in range(0, len(p), CHUNK)]
+    chunks = [c for c in chunks if len(c) > 200]
+    rng.shuffle(chunks)
+    return chunks
+
+
+def snippets(rng, per_crate: int, n: int, min_lines: int, most: int) -> list[list[str]]:
+    """Runs of 2 to `most` non-blank lines from n source files, taking `per_crate` files from each crate's src/."""
+    files = [f for d in crates() for f in sorted(glob.glob(f"{d}/src/*.rs"))[:per_crate]]
+    out = []
+    for f in rng.sample(files, min(n, len(files))):
+        lines = [x for x in Path(f).read_text(errors="ignore").splitlines() if x.strip()]
+        if len(lines) > min_lines:
+            at = rng.randint(0, len(lines) - most)
+            out.append(lines[at:at + rng.randint(2, most)])
+    return out
 
 
 def public_rows():
@@ -99,13 +141,10 @@ def public_rows():
     for name, dataset, revision, split, first, n in SOURCES["datasets"]:
         key, labels = ("type", "entities") if name == "zh" else ("label", "spans")
         for r in load_dataset(dataset, split=split, revision=revision, streaming=True).skip(first).take(n):
-            gold = []
-            for g in ast.literal_eval(r[labels]) if isinstance(r[labels], str) else r[labels]:
-                seen[g[key]] += 1
-                if cat := category(g[key]):
-                    gold.append([g["start"], g["end"], cat])
+            spans = entities(r[labels], key)
+            seen.update(kind for _, _, kind in spans)
             if r["text"].strip():
-                yield {"source": name, "text": r["text"], "gold": gold}
+                yield {"source": name, "text": r["text"], "gold": [[s, e, cat] for s, e, kind in spans if (cat := category(kind))]}
     print("dataset labels:", dict(seen.most_common()), file=sys.stderr)
 
 
@@ -143,16 +182,26 @@ def planted(fake, rng):
     return lines
 
 
+def plant(text: str, lines, rng) -> tuple[str, list]:
+    """`text` with the planted lines put after a line break at a random point, and the spans of their values."""
+    cut = text.find("\n", rng.randint(0, len(text) - 1)) + 1
+    text = text[:cut] + "".join(line + "\n" for line, _ in lines) + text[cut:]
+    gold, at = [], cut
+    for line, values in lines:
+        for value, cat in values:
+            s = text.index(value, at)
+            gold.append([s, s + len(value), cat])
+        at += len(line) + 1
+    return text, gold
+
+
 def dev_rows():
-    from faker import Faker
     rng = random.Random(5)
-    fakes = [Faker(loc) for loc in ("en_US", "en_GB", "de_DE", "es_ES", "fr_FR", "zh_CN", "ja_JP", "pt_BR", "it_IT", "en_IN")]
-    for f in fakes:
-        f.seed_instance(rng.randint(0, 10**9))
+    fakes = fakers(rng, ("en_US", "en_GB", "de_DE", "es_ES", "fr_FR", "zh_CN", "ja_JP", "pt_BR", "it_IT", "en_IN"))
     files = []
     for d in crates():
         files += sorted(glob.glob(f"{d}/src/**/*.rs", recursive=True))[:3] + glob.glob(f"{d}/Cargo.toml") + glob.glob(f"{d}/README.md")[:1]
-    site = sorted(glob.glob(f"{sysconfig.get_paths()['purelib']}/*/*.py"))
+    site = python_files()
     rng.shuffle(site)
     files += site[:400]
     parts = []
@@ -161,22 +210,10 @@ def dev_rows():
             parts.append(Path(f).read_text()[:5 * CHUNK])
         except (UnicodeDecodeError, OSError):
             pass
-    chunks = [p[i:i + CHUNK] for p in parts for i in range(0, len(p), CHUNK)]
-    chunks = [c for c in chunks if len(c) > 200]
-    rng.shuffle(chunks)
-    for n, text in enumerate(chunks[:DEV_ROWS]):
+    for n, text in enumerate(chunked(parts, rng)[:DEV_ROWS]):
         gold = []
         if n % 3 == 0:
-            lines = planted(rng.choice(fakes), rng)
-            cut = text.find("\n", rng.randint(0, len(text) - 1)) + 1
-            block = "".join(line + "\n" for line, _ in lines)
-            text = text[:cut] + block + text[cut:]
-            at = cut
-            for line, values in lines:
-                for value, cat in values:
-                    s = text.index(value, at)
-                    gold.append([s, s + len(value), cat])
-                at += len(line) + 1
+            text, gold = plant(text, planted(rng.choice(fakes), rng), rng)
         yield {"source": "dev", "text": text, "gold": gold}
 
 
@@ -197,11 +234,8 @@ def lock_rows():
     """Hash-heavy developer text with nothing private in it: other projects' Cargo.lock files, file checksums and git
     object listings. Only the planted values are labeled, so every checksum is a negative. npm lockfiles stay out:
     the held-out developer corpus has one, so it checks whether this carries over."""
-    from faker import Faker
     rng = random.Random(9)
-    fakes = [Faker(loc) for loc in ("en_US", "en_GB", "de_DE", "es_ES", "fr_FR", "zh_CN", "ja_JP", "pt_BR", "it_IT", "en_IN")]
-    for f in fakes:
-        f.seed_instance(rng.randint(0, 10**9))
+    fakes = fakers(rng, ("en_US", "en_GB", "de_DE", "es_ES", "fr_FR", "zh_CN", "ja_JP", "pt_BR", "it_IT", "en_IN"))
     sources = crates()
     git = lambda repo, *a: subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True).stdout
     parts = [(d / "Cargo.lock").read_text()[:2 * CHUNK] for d in sources if (d / "Cargo.lock").exists()]
@@ -209,28 +243,18 @@ def lock_rows():
         parts.append(checksums(d, "*.rs", "sha256"))
         parts.append(checksums(d, "*", "md5"))
     for name, (url, commit) in sorted(SOURCES["repos"].items()):
-        repo = checkout(url, commit, DATA / "repos" / name)
+        repo = checkout(name, url, commit, DATA / "repos")
         parts.append("".join(git(repo, "ls-files", "-s").splitlines(keepends=True)[:300]))
         parts.append("".join(git(repo, "rev-list", "--objects", "HEAD").splitlines(keepends=True)[:300]))
-    chunks = [p[i:i + CHUNK] for p in parts for i in range(0, len(p), CHUNK)]
-    chunks = [c for c in chunks if len(c) > 200]
-    rng.shuffle(chunks)
-    for n, text in enumerate(chunks[:800]):
+    for n, text in enumerate(chunked(parts, rng)[:800]):
         gold = []
         if n % 3 == 0:
             lines = planted(rng.choice(fakes), rng)
             if rng.random() < 0.5:  # a hex secret under a secret's name, so the name decides, not the characters
                 key = hex_key(rng)
                 lines.append((rng.choice([f"SECRET_KEY={key}", f'api_secret = "{key}"', f"  client_secret: {key}"]), [(key, "secret")]))
-            cut = text.find("\n", rng.randint(0, len(text) - 1)) + 1
-            text = text[:cut] + "".join(line + "\n" for line, _ in lines) + text[cut:]
-            at = cut
-            for line, values in lines:
-                for value, cat in values:
-                    s = text.index(value, at)
-                    gold.append([s, s + len(value), cat])
-                at += len(line) + 1
-        yield {"source": "lock", "text": text, "gold": gold, "teacher": []}
+            text, gold = plant(text, lines, rng)
+        yield {"source": "lock", "text": text, "gold": gold}
 
 
 SECRET_NAMES = ["key", "secret", "token", "password", "passwd", "pwd", "api_key", "apikey", "api_secret", "access_key", "secret_key",
@@ -282,13 +306,7 @@ def contrast_rows(n: int):
     """Code and config files where values of the same shapes sit under secret names (labeled) and under checksum, ID
     and hash names (not labeled), between lines of real source code."""
     rng = random.Random(13)
-    files = [f for d in crates() for f in sorted(glob.glob(f"{d}/src/*.rs"))[:2]]
-    filler = []
-    for f in rng.sample(files, min(300, len(files))):
-        lines = [x for x in Path(f).read_text(errors="ignore").splitlines() if x.strip()]
-        if len(lines) > 12:
-            at = rng.randint(0, len(lines) - 6)
-            filler.append(lines[at:at + rng.randint(2, 6)])
+    filler = snippets(rng, 2, 300, 12, 6)
     for _ in range(n):
         kind = rng.choice(list(FORMATS))
         out, gold = [], []
@@ -306,7 +324,7 @@ def contrast_rows(n: int):
                     start = sum(len(x) + 1 for x in out) + line.index(v)
                     gold.append([start, start + len(v), "secret"])
                 out.append(line)
-        yield {"source": "contrast", "text": "\n".join(out) + "\n", "gold": gold, "teacher": []}
+        yield {"source": "contrast", "text": "\n".join(out) + "\n", "gold": gold}
 
 
 class Doc:
@@ -332,9 +350,7 @@ def agent_rows(n: int):
     secrets; pod names, request and trace IDs, UUIDs, hashes, digests, private-range IPs, ports and times are not."""
     from faker import Faker
     rng = random.Random(21)
-    fakes = [Faker(loc) for loc in ("en_US", "en_GB", "de_DE", "fr_FR", "es_ES", "it_IT", "pt_BR", "nl_NL", "en_IN", "zh_CN", "ja_JP", "ko_KR")]
-    for f in fakes:
-        f.seed_instance(rng.randint(0, 10**9))
+    fakes = fakers(rng, ("en_US", "en_GB", "de_DE", "fr_FR", "es_ES", "it_IT", "pt_BR", "nl_NL", "en_IN", "zh_CN", "ja_JP", "ko_KR"))
     loose = Faker()  # passwords and card numbers; seeded apart from rng, so every other value stays as it was
     loose.seed_instance(21)
     hexs = lambda k: "".join(rng.choices("0123456789abcdef", k=k))
@@ -347,7 +363,7 @@ def agent_rows(n: int):
         ascii_ok = (first + last).isascii()
         user = rng.choice([f"{first[0]}{last}", f"{first}.{last}", f"{first}{rng.randint(1, 99)}"]).lower() if ascii_ok else f"user{rng.randint(100, 999)}"
         email = f"{user if ascii_ok else alnum(8)}@{rng.choice(['example.com', 'example.org', 'mail.example.net', f.domain_name()])}"
-        return f, f.name(), user, email, ascii_ok
+        return f, f.name(), user, email
 
     def public_ip():
         while True:
@@ -401,7 +417,7 @@ def agent_rows(n: int):
 
     def json_log(d):
         for _ in range(rng.randint(3, 8)):
-            _, name, user, email, _ = person()
+            _, name, user, email = person()
             d.add('{"ts": "' + ts() + '", "level": "' + rng.choice(["info", "warn", "error"]) + '", "msg": "' + rng.choice(["user signed in", "payment failed", "profile updated", "token refreshed"]) + '", ')
             d.add(f'"user_id": "usr_{alnum(12)}", "email": "')
             d.add(email, "private_email")
@@ -440,7 +456,7 @@ def agent_rows(n: int):
 
     def git_log(d):
         for _ in range(rng.randint(2, 5)):
-            _, name, _, email, _ = person()
+            _, name, _, email = person()
             d.add(f"commit {hexs(40)}\nAuthor: ")
             d.add(name, "private_person")
             d.add(" <")
@@ -459,7 +475,7 @@ def agent_rows(n: int):
     def csv_export(d):
         d.add("id,name,email,phone,city,plan,amount\n")
         for i in range(rng.randint(3, 10)):
-            f, name, _, email, _ = person()
+            f, name, _, email = person()
             d.add(f"{i + 1},")
             d.add(name, "private_person")
             d.add(",")
@@ -471,7 +487,7 @@ def agent_rows(n: int):
             d.add(f",{rng.choice(['free', 'pro', 'team'])},{rng.randint(0, 900)}.{rng.randint(0, 99):02d}\n")
 
     def config(d):
-        _, _, user, email, _ = person()
+        _, _, user, email = person()
         d.add(f"service:\n  name: {rng.choice(['orders', 'ledger', 'mailer'])}\n  host: {rng.choice(['db.internal', 'redis.svc.cluster.local', 'api.staging.example.com'])}\n  port: {rng.choice([5432, 6379, 8080, 443])}\n")
         d.add("database:\n  user: app\n  password: ")
         d.add(secret(), "secret")
@@ -492,7 +508,7 @@ def agent_rows(n: int):
         """Pull request and review text: people's handles are private, organizations and teams are not."""
         org = rng.choice(["acme", "initech", "globex", "hooli", "wayne-labs"])
         for _ in range(rng.randint(2, 6)):
-            f, name, user, email, _ = person()
+            f, name, user, email = person()
             handle = user.replace(".", "-")
             form = rng.randint(0, 5)
             if form == 0:
@@ -607,7 +623,7 @@ def agent_rows(n: int):
         for fmt in rng.sample(kinds, rng.randint(1, 3)):
             fmt(d)
             d.add("\n")
-        yield {"source": "agent", "text": d.text(), "gold": d.spans, "teacher": []}
+        yield {"source": "agent", "text": d.text(), "gold": d.spans}
 
 
 def secret_rows(n: int):
@@ -616,13 +632,7 @@ def secret_rows(n: int):
     provider tokens and private keys. Code lines from real crates sit between them."""
     import base64
     rng = random.Random(29)
-    files = [f for d in crates() for f in sorted(glob.glob(f"{d}/src/*.rs"))[:1]]
-    filler = []
-    for f in rng.sample(files, min(200, len(files))):
-        lines = [x for x in Path(f).read_text(errors="ignore").splitlines() if x.strip()]
-        if len(lines) > 10:
-            at = rng.randint(0, len(lines) - 5)
-            filler.append(lines[at:at + rng.randint(2, 5)])
+    filler = snippets(rng, 1, 200, 10, 5)
     alnum = lambda k, chars="abcdefghijklmnopqrstuvwxyz0123456789": "".join(rng.choices(chars, k=k))
     secret_names = ["authData", "key", "secretKey", "hmacKey", "aesKey", "privKey", "seed", "psk", "masterSecret", "sessionKey", "signingKey",
                     "salt", "nonce", "token", "apiSecret", "encKey"]
@@ -727,7 +737,7 @@ def secret_rows(n: int):
                 for x in rng.choice(filler):
                     d.add(x + "\n")
             line(d, rng.random() < 0.5)
-        yield {"source": "secret", "text": d.text(), "gold": d.spans, "teacher": []}
+        yield {"source": "secret", "text": d.text(), "gold": d.spans}
 
 
 def zh_docs_rows():
@@ -737,10 +747,8 @@ def zh_docs_rows():
     rng = random.Random(41)
     fake = Faker("zh_CN")
     fake.seed_instance(41)
-    for name, (url, commit) in SOURCES["zh_docs"].items():
-        checkout(url, commit, DATA / "zh_docs" / name, ZH_DOCS_FILES)
-    files = sorted(glob.glob(str(DATA / "zh_docs/**/*.md"), recursive=True))
-    cjk = re.compile(r"[\u4e00-\u9fff]")
+    files = sorted(f for name, (url, commit) in SOURCES["zh_docs"].items()
+                   for f in glob.glob(str(checkout(name, url, commit, DATA / "zh_docs", ZH_DOCS_FILES) / "**/*.md"), recursive=True))
     chunks = []
     for f in files:
         lines, cur = Path(f).read_text(errors="ignore").splitlines(keepends=True), ""
@@ -751,7 +759,7 @@ def zh_docs_rows():
                 cur = ""
         if len(cur) > 300:
             chunks.append(cur)
-    chunks = [c for c in chunks if len(cjk.findall(c)) > 0.12 * len(c)]
+    chunks = [c for c in chunks if len(CJK.findall(c)) > 0.12 * len(c)]
     rng.shuffle(chunks)
     templates = ["> 如有疑问，请联系{name}（{email}）。", "本节由{name}整理，问题请打电话 {phone}。", "感谢{name}提供的示例。",
                  "维护者：{name} <{email}>", "反馈请发邮件给 {email}，或在群里找{name}。"]
@@ -773,9 +781,6 @@ def zh_docs_rows():
         else:
             d.add(text)
         yield {"source": "zh_docs", "text": d.text(), "gold": d.spans}
-
-
-CJK = re.compile(r"[一-鿿]")
 
 
 def not_a_name(text: str, span: list) -> bool:
@@ -800,25 +805,26 @@ def natural():
     with open(partial, "a") as out:
         for i in range(done, len(rows), 400):
             batch = rows[i:i + 400]
-            for r, s in zip(batch, spans([r["text"] for r in batch])):
+            for r, s in zip(batch, run([r["text"] for r in batch], env=TEACHER)):
                 out.write(json.dumps(dict(r, teacher=s["detected"]), ensure_ascii=False) + "\n")
             out.flush()
             print(f"teacher labels {i + len(batch)} of {len(rows)}", flush=True)
-    write(DATA / "natural.jsonl", [json.loads(line) for line in open(partial)] + [dict(r, teacher=[]) for r in dev_rows()])
+    write(DATA / "natural.jsonl", [json.loads(line) for line in open(partial)] + list(dev_rows()))
     partial.unlink()
 
 
 def constructed():
-    """data/constructed.jsonl. The Chinese documentation is labeled by the teacher followed by holdback's rules, minus
-    person spans that cannot be names, plus the planted values the teacher missed."""
+    """data/constructed.jsonl. The Chinese documentation's teacher spans are the Privacy Filter's after holdback's
+    rules, without person spans that cannot be names; its gold spans are the planted values."""
     DATA.mkdir(exist_ok=True)
     rows = list(contrast_rows(1500)) + list(agent_rows(2000)) + list(secret_rows(1500)) + list(lock_rows())
     docs = list(zh_docs_rows())
-    for r, s in zip(docs, spans([r["text"] for r in docs])):
-        found = [x for x in s["refined"] if not not_a_name(r["text"], x)]
-        r["gold"] = found + [g for g in r["gold"] if not any(g[0] < e and s0 < g[1] for s0, e, _ in found)]
-    write(DATA / "constructed.jsonl", rows + [dict(r, teacher=[]) for r in docs])
+    for r, s in zip(docs, run([r["text"] for r in docs], env=TEACHER)):
+        r["teacher"] = [x for x in s["refined"] if not not_a_name(r["text"], x)]
+    write(DATA / "constructed.jsonl", rows + docs)
 
 
 if __name__ == "__main__":
+    if os.environ.get("PYTHONHASHSEED") != "0":  # Faker builds some value lists, Italian cities among them, from sets
+        os.execve(sys.executable, [sys.executable, *sys.argv], os.environ | {"PYTHONHASHSEED": "0"})
     {"natural": natural, "constructed": constructed}[sys.argv[1]]()

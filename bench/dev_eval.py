@@ -23,7 +23,7 @@ from spans import spans
 
 ROOT = Path(__file__).parent.parent
 SOURCE = ["rust/holdback/src/native.rs", "rust/holdback/src/detect.rs", "rust/holdback/src/server.rs", "rust/holdback/src/protocols.rs",
-          "rust/holdback/src/main.rs", "rust/holdback/src/setup.rs", "rust/holdback/src/hooks.rs", "rust/holdback/src/vault.rs", "install.sh",
+          "rust/holdback/src/main.rs", "rust/holdback/src/models.rs", "rust/holdback/src/setup.rs", "rust/holdback/src/hooks.rs", "rust/holdback/src/vault.rs", "install.sh",
           "plugins/claude-code/hooks/hook.sh", "plugins/claude-code/hooks/session_start.sh", "bench/spans.py", "bench/detect_eval.py"]
 LOCKS = ["rust/holdback/Cargo.lock", "uv.lock", "rust/holdback/Cargo.toml", "pyproject.toml"]
 PINNED = "9e6c174"  # git commands read history up to this commit, so the corpus does not change with every new commit

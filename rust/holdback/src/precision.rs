@@ -402,9 +402,8 @@ mod tests {
 
     /// Both detectors, each downloaded by one start of holdback with HOLDBACK_DETECTOR set to its name.
     fn detectors() -> Vec<crate::detect::Detector> {
-        let filter = crate::detect::Detector::load(&crate::PRIVACY_FILTER.dir()).expect("run `HOLDBACK_DETECTOR=privacy-filter holdback serve` once to download the Privacy Filter");
-        let distilled = crate::student::Student::load(&crate::DISTILLED.dir()).expect("run `holdback serve` once to download the distilled model");
-        vec![filter, crate::detect::Detector::Student(Box::new(distilled))]
+        let open = |m: &crate::models::Model| m.open(&m.dir()).unwrap_or_else(|e| panic!("{e:#}; run `HOLDBACK_DETECTOR={} holdback serve` once to download it", m.name));
+        vec![open(&crate::models::PRIVACY_FILTER), open(&crate::models::DISTILLED)]
     }
 
     /// Cases from real agent traffic, run through both detectors: each value in `kept` must survive and each value

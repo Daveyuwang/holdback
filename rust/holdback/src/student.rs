@@ -138,7 +138,7 @@ thread_local! {
     static SCORES: std::cell::RefCell<Vec<f32>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Buffers reused across calls.
+/// Buffers kept from one call to the next.
 #[derive(Default)]
 struct Work {
     x: Vec<f32>,
@@ -337,18 +337,14 @@ fn erf(x: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    /// Logits that PyTorch gives for a few windows (testdata/student_logits.json), for the published model. Skipped
-    /// until the model is downloaded (`holdback serve` once).
+    /// Logits that PyTorch gives for a few windows (testdata/student_logits.json), for the published model, which
+    /// `holdback serve` downloads.
     #[test]
     fn matches_pytorch() {
-        if !crate::DISTILLED.missing().is_empty() {
-            eprintln!("skipped: the distilled model is not in {}", crate::DISTILLED.dir().display());
-            return;
-        }
         let fixture: serde_json::Value = serde_json::from_str(include_str!("testdata/student_logits.json")).unwrap();
         let windows: Vec<Vec<u32>> = serde_json::from_value(fixture["windows"].clone()).unwrap();
         let want: Vec<f32> = serde_json::from_value(fixture["logits"].clone()).unwrap();
-        let student = super::Student::load(&crate::DISTILLED.dir()).unwrap();
+        let student = super::Student::load(&crate::models::DISTILLED.cache_dir()).expect("no model; run `holdback serve` once to download it");
         let refs: Vec<&[u32]> = windows.iter().map(Vec::as_slice).collect();
         let got = student.model.logits(&refs, student.cls, student.sep, &mut super::Work::default()).unwrap();
         assert_eq!(got.len(), want.len());

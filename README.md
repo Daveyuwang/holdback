@@ -73,18 +73,21 @@ cargo install --git https://github.com/Daveyuwang/holdback holdback
 
 The first start downloads holdback's detector to `~/.cache/holdback`: a model of 28M parameters distilled from
 OpenAI's [Privacy Filter](https://github.com/openai/privacy-filter) (about 115 MB, Apache-2.0,
-[model card](https://huggingface.co/limbo23/holdback-student)). Each file is kept only if its SHA-256 matches;
-`HF_ENDPOINT` sends the download to a Hugging Face mirror. holdback runs the model with its own code and maps the
-weight file into memory instead of copying it. The proxy answers about 0.05 seconds after it starts, uses about
-45 MB of memory when idle and about 120 MB after long inputs, and adds about 15 ms to a request of 900 characters
-(`bench/speed.py`). The mapped model file counts as file cache, which the system can reclaim. On macOS the matrix
-math runs on Apple's Accelerate; elsewhere a portable Rust library does it, which on the same Mac was about 2.5
-times slower. Homebrew and npm packages are planned.
+[model card](https://huggingface.co/limbo23/holdback-student)). holdback checks each file against a pinned
+SHA-256 and keeps only files that match. `HF_ENDPOINT` sends the download to a Hugging Face mirror; on a machine
+without network access, `HOLDBACK_STUDENT_DIR` names a folder where you put the model's files yourself.
 
-`HOLDBACK_DETECTOR=privacy-filter` runs the Privacy Filter itself instead, in its 4-bit ONNX form (about 0.9 GB).
-It misses fewer values in French, German, Italian, Spanish and Dutch text. The distilled model misses far fewer in
-English and Chinese, and a request takes it 5 to 7 times less time. [Benchmark](#benchmark) compares the two, and
-[distill/](distill/README.md) has the code that trains the distilled model.
+holdback runs the model with its own code and maps the weight file into memory instead of copying it; the mapped
+file counts as file cache, which the system can reclaim. The proxy answers less than 0.05 seconds after it starts,
+uses about 40 MB of memory when idle and about 120 MB after long inputs, and adds about 15 ms to a request of 900
+characters (`bench/speed.py`). On macOS the matrix math runs on Apple's Accelerate, elsewhere on a portable Rust
+library. Homebrew and npm packages are planned.
+
+`HOLDBACK_DETECTOR=privacy-filter` runs the Privacy Filter itself instead, in its 4-bit ONNX form (about 0.9 GB;
+`HOLDBACK_MODEL_DIR` names your own copy). It misses fewer values in French, German, Italian, Spanish and Dutch
+text. The distilled model misses far fewer in English and Chinese and handles a request 6 to 7 times faster.
+[Benchmark](#benchmark) compares the two, and [distill/](distill/README.md) has the code that trains the distilled
+model.
 
 ## Claude Code
 
@@ -191,10 +194,15 @@ are stored in `~/.config/holdback/lists.json`.
 
 ## Limits
 
-- On four public sets of personal data holdback misses 0 to 5% of labeled values. Two of them,
-  [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) and Nemotron-PII, also gave rows to the
-  distilled model's training, so they are not held out for it. On the English rows of ai4privacy the misses are
-  mostly cities, postcodes, user names and dates of birth.
+- On the two public sets of personal data that the distilled model never trained on, holdback misses 0.6%
+  (PrivacyBench) and 5.4% (the English rows of ai4privacy) of labeled values. The ai4privacy misses are mostly
+  cities, postcodes, user names and dates of birth. The numbers on
+  [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) and Nemotron-PII are not held out: 300
+  of the benchmark's 400 PII Bench ZH rows were training rows, and the training used Nemotron-PII's training
+  split.
+- The distilled model leaves the names and emails in a crate's `Cargo.toml` `authors` list in place, because its
+  training text labeled them as not private. `HOLDBACK_DETECTOR=privacy-filter` replaces most of them, and
+  `holdback replace` adds a name for either detector.
 - In French, German, Italian, Spanish and Dutch the distilled model misses more than the Privacy Filter: 11 to 18%
   of labeled values against 5 to 16%, mostly dates of birth, building numbers, postcodes and ID numbers (100 rows
   of ai4privacy per language, `distill/heldout.py`). For such text, set `HOLDBACK_DETECTOR=privacy-filter`. Other
@@ -205,7 +213,7 @@ are stored in `~/.config/holdback/lists.json`.
   More than half of those are UUIDs, which holdback keeps because agents use them as identifiers.
 - A long input takes longest the first time it is sent: a 48,000-character file adds about 0.4 seconds on an
   Apple silicon Mac. Later requests reuse the result, and a text that differs a little from an earlier one, such
-  as a file after an edit, costs only its changed parts: about 40 ms for a 13 KB file.
+  as a file after an edit, costs only its changed parts: about 25 ms for a 13 KB file.
 - Names of public figures are sometimes replaced.
 - Text-level redaction cannot see data that an agent encodes itself. In testing, one model printed a file with
   `od` to read a password around the redaction. The system line now forbids this, but holdback does not enforce
@@ -272,14 +280,14 @@ commands), with made-up names, emails and keys planted at known places.
 
 | Developer output | False replacements per 100 KB | Planted values leaked |
 | --- | --- | --- |
-| Tuning corpus, detector alone | 16 | 0 of 39 |
+| Tuning corpus, detector alone | 17 | 0 of 39 |
 | Tuning corpus, with holdback's rules | 4 | 0 of 39 |
 | Held-out corpus, detector alone | 31 | 0 of 45 |
 | Held-out corpus, with holdback's rules | 2 | 0 of 45 |
 
 The rules were tuned on the first corpus. The held-out corpus is the source of three crates, an npm lockfile and
 other commands; the distilled model alone takes the npm lockfile's integrity hashes for secrets, and the rules
-keep them. With the Privacy Filter the rules leave 4 and 0 false replacements per 100 KB.
+keep them. With the Privacy Filter the rules leave 7 and 0 false replacements per 100 KB.
 
 `bench/real_eval.py` runs real agent sessions: Claude Code, headless, on copies of nine public crates, five
 tasks each, with hook mode on and with it off. Every task has a check a program can verify, such as writing
@@ -336,8 +344,8 @@ their own, such as dates, occupation, country and organization, are not counted.
 | holdback | 0.0%, 3.2% | 0.0%, 18.2% | 5.4%, 11.2% | 1.6%, 0.2% | 0.6%, 0.5% | 29.9%, 8.2% |
 | holdback with the Privacy Filter | 0.3%, 3.2% | 14.4%, 17.5% | 12.7%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
 
-PII Bench ZH and Nemotron-PII gave other rows to the distilled model's training, so those two columns are not
-held out for it.
+300 of the 400 PII Bench ZH rows were among the distilled model's training rows, and its training used
+Nemotron-PII's training split, so those two columns are not held out for it.
 
 | Task success, one run, 186 tasks | Raw | Codex patterns | Presidio | rehydra | holdback with the Privacy Filter |
 | --- | --- | --- | --- | --- | --- |

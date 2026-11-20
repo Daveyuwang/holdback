@@ -18,7 +18,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/holdback
-          key: models-${{ hashFiles('rust/holdback/src/main.rs') }}  # main.rs pins the model revisions
+          key: models-${{ hashFiles('rust/holdback/src/models.rs') }}  # models.rs pins the model revisions
+          restore-keys: models-  # holdback keeps the files of an older cache that still match and downloads the rest
       - run: cargo clippy --release --all-targets -- -D warnings
       - name: Download both detectors and detect a sample with each
         run: |

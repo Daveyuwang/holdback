@@ -11,22 +11,17 @@ by holdback's rules, with holdback's metric code (bench/public_eval.py):
   european      100 validation rows in each of ai4privacy's languages other than English, scored per language; its
                 license allows academic and non-commercial use, so it is read for evaluation only, as in bench/
 
-The sets and the Privacy Filter's spans are cached in distill/data/.
+The downloaded sets and the spans are kept in bench/results/ under heldout_ names.
 Usage: uv run --group distill python distill/heldout.py MODEL_DIR [SET ...]"""
-import csv
 import json
-import os
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE.parent / "bench"))
-from public_eval import ROWS, entities, evaluate, fetch  # noqa: E402
-from spans import BINARY, RESULTS  # noqa: E402
+from public_eval import ROWS, credentials, entities, evaluate, excerpt, fetch, spread  # noqa: E402
+from spans import RESULTS, cached, detector_env, spans  # noqa: E402
 
-DATA = HERE / "data"
 PERSONAS = ["elena_stripe", "grace_deere_company", "hannah_salesforce"]
 MSRA = ("PassbyGrocer/msra-ner", "01b2a657f0baa679c86154a3499706a069b73179")
 MSRA_TAGS = ["O", "B-LOC", "I-LOC", "B-ORG", "I-ORG", "B-PER", "I-PER"]
@@ -38,35 +33,20 @@ def personas():
     return [row for p in PERSONAS for row in fetch(query(p), lambda r: (r["text"], entities(r["ground_truth_spans"], "label")), 300)]
 
 
-def creddata(n=400, around=10):
-    """Credentials from files none of three earlier samples took anything from: the benchmark's evenly spaced sample
+def creddata(n=400):
+    """Credentials from files none of three earlier samples took anything from: the benchmark's evenly spread sample
     (public_eval.creddata), one from the repositories that sample did not touch, and every credential of the
     repositories neither touched. The repositories overlap with those samples; the files do not."""
-    root = RESULTS / "CredData"
-    true = {}  # file -> its true credentials as (first line, start, last line, end, category, repository), 0-based
-    for meta in sorted(root.glob("meta/*.csv")):
-        for r in csv.DictReader(meta.open(encoding="utf-8")):
-            if r["GroundTruth"] == "T" and r["ValueStart"] and r["ValueEnd"] and (root / r["FilePath"]).exists():
-                true.setdefault(r["FilePath"], []).append((int(r["LineStart"]) - 1, int(r["ValueStart"]), int(r["LineEnd"]) - 1,
-                                                           int(r["ValueEnd"]), r["Category"], r["RepoName"]))
+    true = credentials()
     every = [(path, c) for path, creds in true.items() for c in creds]
-    sample = every[:: len(every) // 400][:400]
+    sample = spread(every, 400)
     used_files, used_repos = {path for path, _ in sample}, {c[5] for _, c in sample}
     fresh = [(path, c) for path, c in every if c[5] not in used_repos]
-    second = fresh[:: max(1, len(fresh) // 400)][:400]
+    second = spread(fresh, 400)
     used_files |= {path for path, _ in second}
     touched = {c[5] for _, c in second}
     used_files |= {path for path, c in fresh if c[5] not in touched}
-    rest = [(path, c) for path, c in every if path not in used_files]
-    rows = []
-    for path, (first, _, last, _, _, _) in rest[:: max(1, len(rest) // n)][:n]:
-        lines = (root / path).read_text(encoding="utf-8", errors="replace").split("\n")
-        top, bottom = max(0, first - around), min(len(lines), last + around + 1)
-        at = {top: 0}  # line number -> offset of its first character in the excerpt
-        for i in range(top, bottom):
-            at[i + 1] = at[i] + len(lines[i]) + 1
-        rows.append(["\n".join(lines[top:bottom]), [[at[a] + s, at[b] + e, kind] for a, s, b, e, kind, _ in true[path] if top <= a and b < bottom]])
-    return rows
+    return [excerpt(true, path, c) for path, c in spread([(path, c) for path, c in every if path not in used_files], n)]
 
 
 def msra():
@@ -102,36 +82,18 @@ def european():
             return rows
 
 
+def requests(part: str) -> list:
+    return json.loads((HERE / "zh_requests.json").read_text())[part]
+
+
 SETS = {
     "personas": ("PrivacyBench, three personas never trained on", personas),
     "creddata": ("CredData, credentials from files no earlier sample used", creddata),
     "msra": ("Chinese person names, MSRA NER test, odd rows", msra),
-    "requests": ("Chinese developer requests", lambda: json.loads((HERE / "zh_requests.json").read_text())["fresh"]),
-    "requests_dev": ("Chinese developer requests, development set", lambda: json.loads((HERE / "zh_requests.json").read_text())["dev"]),
+    "requests": ("Chinese developer requests", lambda: requests("fresh")),
+    "requests_dev": ("Chinese developer requests, development set", lambda: requests("dev")),
     "european": ("ai4privacy validation", european),
 }
-
-
-def holdback(texts: list[str], student: Path | None) -> list[dict]:
-    """`holdback spans` with the Privacy Filter, or with the distilled model in `student`."""
-    env = {k: v for k, v in os.environ.items() if k != "HOLDBACK_STUDENT_DIR"} | {"HOLDBACK_DETECTOR": "privacy-filter"}
-    if student:
-        env |= {"HOLDBACK_DETECTOR": "distilled", "HOLDBACK_STUDENT_DIR": str(student)}
-    with tempfile.TemporaryDirectory() as d:
-        f = Path(d) / "texts.json"
-        f.write_text(json.dumps({"texts": texts}))
-        return json.loads(subprocess.run([BINARY, "spans", str(f)], env=env, capture_output=True, text=True, check=True).stdout)
-
-
-def cached(name: str, compute, texts: list[str] | None = None):
-    """A result kept in distill/data/; with `texts`, recomputed when the texts it was computed for change."""
-    path = DATA / f"heldout_{name}.json"
-    if path.exists() and (saved := json.loads(path.read_text()))["texts"] == texts:
-        return saved["value"]
-    DATA.mkdir(exist_ok=True)
-    value = compute()
-    path.write_text(json.dumps({"texts": texts, "value": value}, ensure_ascii=False))
-    return value
 
 
 def main():
@@ -141,10 +103,10 @@ def main():
         if key == "creddata" and not (RESULTS / "CredData/data").exists():
             print(f"{title}: skipped, bench/results/CredData is not downloaded")
             continue
-        rows = cached(key, build)
+        rows = build() if key.startswith("requests") else cached(f"heldout_{key}", build)
         texts = [r[0] for r in rows]
-        teacher = cached(f"{key}_teacher", lambda: holdback(texts, None), texts)
-        student = holdback(texts, model)
+        teacher = spans(texts, f"heldout_{key}_spans", env=detector_env("privacy-filter"))
+        student = spans(texts, f"heldout_{key}_spans", env=detector_env("distilled", model))
         groups = {}  # the European set is scored per language
         for i, r in enumerate(rows):
             groups.setdefault(r[2] if len(r) > 2 else "", []).append(i)

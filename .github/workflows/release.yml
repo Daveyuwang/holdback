@@ -57,7 +57,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/holdback
-          key: distilled-${{ hashFiles('rust/holdback/src/main.rs') }}
+          key: distilled-${{ hashFiles('rust/holdback/src/models.rs') }}
           enableCrossOsArchive: true
       - run: holdback --version && holdback doctor
       - name: Detect a sample

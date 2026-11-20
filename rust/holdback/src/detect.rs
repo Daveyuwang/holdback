@@ -171,10 +171,6 @@ pub enum Detector {
 }
 
 impl Detector {
-    pub fn load(dir: &Path) -> Result<Self> {
-        Ok(Detector::Filter(Box::new(Filter::load(dir)?)))
-    }
-
     /// Private-value spans with byte offsets into `text`, non-overlapping and sorted.
     pub fn detect(&mut self, text: &str) -> Result<Vec<Span>> {
         match self {
@@ -186,8 +182,8 @@ impl Detector {
     /// The name the status page and `holdback doctor` show.
     pub fn name(&self) -> &'static str {
         match self {
-            Detector::Filter(_) => "privacy-filter",
-            Detector::Student(_) => "distilled",
+            Detector::Filter(_) => crate::models::PRIVACY_FILTER.name,
+            Detector::Student(_) => crate::models::DISTILLED.name,
         }
     }
 }

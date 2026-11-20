@@ -55,9 +55,11 @@ holdback setup claude
 cargo install --git https://github.com/Daveyuwang/holdback holdback
 ```
 
-第一次启动会把 holdback 的检测模型下载到 `~/.cache/holdback`。它有 2800 万参数，由 OpenAI 的 [Privacy Filter](https://github.com/openai/privacy-filter) 蒸馏而来，约 115 MB，Apache-2.0 协议，详见[模型卡](https://huggingface.co/limbo23/holdback-student)。每个文件的 SHA-256 对上了才会保留；设置 `HF_ENDPOINT` 可以改从 Hugging Face 镜像下载。holdback 用自己的代码运行模型，权重文件直接映射进内存，不再复制一份。代理启动后约 0.05 秒就能响应，空闲时占用约 45 MB 内存，处理过长文本后约 120 MB，900 个字符的请求多花约 15 毫秒（`bench/speed.py`）。映射进来的模型文件算作文件缓存，系统需要时可以收回。macOS 上的矩阵运算交给苹果的 Accelerate 库，其他系统用一个可移植的 Rust 库，在同一台 Mac 上测要慢约 2.5 倍。npm 和 Homebrew 的预编译包还在计划中。
+第一次启动会把 holdback 的检测模型下载到 `~/.cache/holdback`。它有 2800 万参数，由 OpenAI 的 [Privacy Filter](https://github.com/openai/privacy-filter) 蒸馏而来，约 115 MB，Apache-2.0 协议，详见[模型卡](https://huggingface.co/limbo23/holdback-student)。holdback 会用固定的 SHA-256 核对每个文件，对不上的不保留。设置 `HF_ENDPOINT` 可以改从 Hugging Face 镜像下载；机器不能联网时，把模型文件自己放进一个文件夹，再用 `HOLDBACK_STUDENT_DIR` 指向它。
 
-设置 `HOLDBACK_DETECTOR=privacy-filter` 可以改用 Privacy Filter 本身，即它的 4 位量化 ONNX 模型，约 0.9 GB。在法语、德语、意大利语、西班牙语和荷兰语文本上，它漏得更少。蒸馏模型在英文和中文上漏得少得多，每个请求的耗时只有它的五分之一到七分之一。两者的对比见[基准](#基准)，蒸馏模型的训练代码在 [distill/](distill/README.md)。
+holdback 用自己的代码运行模型，权重文件直接映射进内存，不再复制一份；映射进来的模型文件算作文件缓存，系统需要时可以收回。代理启动后不到 0.05 秒就能响应，空闲时占用约 40 MB 内存，处理过长文本后约 120 MB，900 个字符的请求多花约 15 毫秒（`bench/speed.py`）。macOS 上的矩阵运算交给苹果的 Accelerate 库，其他系统用一个可移植的 Rust 库。npm 和 Homebrew 的预编译包还在计划中。
+
+设置 `HOLDBACK_DETECTOR=privacy-filter` 可以改用 Privacy Filter 本身，即它的 4 位量化 ONNX 模型，约 0.9 GB（自己的副本用 `HOLDBACK_MODEL_DIR` 指定）。在法语、德语、意大利语、西班牙语和荷兰语文本上，它漏得更少。蒸馏模型在英文和中文上漏得少得多，每个请求的耗时只有它的六分之一到七分之一。两者的对比见[基准](#基准)，蒸馏模型的训练代码在 [distill/](distill/README.md)。
 
 ## Claude Code
 
@@ -149,11 +151,12 @@ HOLDBACK_KEY_ENV=BAILIAN_API_KEY holdback run codex --upstream bailian -m qwen3.
 
 ## 已知局限
 
-- 在四个个人信息公开数据集上，holdback 漏掉 0 到 5% 的标注值。其中 [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) 和 Nemotron-PII 的另一部分数据参与了蒸馏模型的训练，所以对它来说这两个不算留出检验。ai4privacy 英文部分漏掉的大多是城市、邮编、用户名和出生日期。
+- 在蒸馏模型没有训练过的两个个人信息公开数据集上，holdback 漏掉 0.6%（PrivacyBench）和 5.4%（ai4privacy 英文部分）的标注值。ai4privacy 上漏掉的大多是城市、邮编、用户名和出生日期。它在 [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) 和 Nemotron-PII 上的数字不算留出检验：基准里 400 条 PII Bench ZH 中有 300 条是训练数据，训练也用了 Nemotron-PII 的训练集。
+- 蒸馏模型不会替换 crate 的 `Cargo.toml` 里 `authors` 列表中的姓名和邮箱，因为它的训练文本把这些标成了非隐私内容。`HOLDBACK_DETECTOR=privacy-filter` 能替换其中大部分；两种检测模型都可以用 `holdback replace` 补上姓名。
 - 在法语、德语、意大利语、西班牙语和荷兰语文本上，蒸馏模型比 Privacy Filter 漏得多：漏掉 11% 到 18% 的标注值，Privacy Filter 是 5% 到 16%，漏的主要是出生日期、门牌号、邮编和证件号（每种语言取 ai4privacy 的 100 行，见 `distill/heldout.py`）。处理这类文本时请设置 `HOLDBACK_DETECTOR=privacy-filter`。韩文、阿拉伯文、印地文等其他文字还没有测过。
 - 在中文文本里，蒸馏模型有时会把普通词当成人名：在新闻文本上误替换了 2.5% 的其他字符，Privacy Filter 是 0.6%（`distill/heldout.py`）。
 - [CredData](https://github.com/Samsung/CredData) 收集的是源码文件里的密钥，holdback 在上面漏掉 30%。其中一半以上是 UUID，holdback 有意保留它们，因为 agent 要拿 UUID 当标识符用。
-- 长文本第一次发送时最慢，在 Apple 芯片的 Mac 上，一个 4.8 万字符的文件要多花约 0.4 秒。之后的请求会复用这次的结果；和之前的文本只差一点的内容，比如编辑后的文件，只需要处理变动的部分，13 KB 的文件约 40 毫秒。
+- 长文本第一次发送时最慢，在 Apple 芯片的 Mac 上，一个 4.8 万字符的文件要多花约 0.4 秒。之后的请求会复用这次的结果；和之前的文本只差一点的内容，比如编辑后的文件，只需要处理变动的部分，13 KB 的文件约 25 毫秒。
 - 公众人物的名字有时会被替换。
 - 文本层面的脱敏看不到 agent 自己编码过的数据。测试中有一个模型用 `od` 打印文件，绕开占位符读到了密码。系统提示现在禁止这样做，holdback 本身还没有强制手段。
 - 模型在哪里写出占位符，holdback 就在哪里还原，不检查命令会把值发到哪里。测试中在 README 里埋了一条指令，让 agent 把密钥发给外部服务器，agent 每次都拒绝了。
@@ -208,12 +211,12 @@ uv run python bench/task_eval.py --runs 1        # 五种条件下的任务成�
 
 | 开发输出 | 每 100 KB 的误替换数 | 预埋值泄漏 |
 | --- | --- | --- |
-| 调参语料，只用检测模型 | 16 | 39 个里 0 个 |
+| 调参语料，只用检测模型 | 17 | 39 个里 0 个 |
 | 调参语料，加上 holdback 的规则 | 4 | 39 个里 0 个 |
 | 留出语料，只用检测模型 | 31 | 45 个里 0 个 |
 | 留出语料，加上 holdback 的规则 | 2 | 45 个里 0 个 |
 
-规则是对着第一份语料调的。留出语料是三个 crate 的源码、一个 npm 锁文件和另一批命令的输出；只用蒸馏模型时，它会把 npm 锁文件里的完整性哈希当成密钥，规则会把这些哈希保留下来。换成 Privacy Filter，加上规则后每 100 KB 的误替换分别是 4 个和 0 个。
+规则是对着第一份语料调的。留出语料是三个 crate 的源码、一个 npm 锁文件和另一批命令的输出；只用蒸馏模型时，它会把 npm 锁文件里的完整性哈希当成密钥，规则会把这些哈希保留下来。换成 Privacy Filter，加上规则后每 100 KB 的误替换分别是 7 个和 0 个。
 
 `bench/real_eval.py` 跑的是真实的智能体会话：让 Claude Code 以无界面方式在九个公开 crate 的副本上各做五个任务，
 钩子模式开和关各跑一遍。每个任务都有程序能验证的检查，比如把清单里的维护者写进一个文件，或者改掉预埋 `.env`
@@ -255,7 +258,7 @@ uv run python bench/task_eval.py --runs 1 --conds raw,codex,presidio,rehydra,ref
 | holdback | 0.0%，3.2% | 0.0%，18.2% | 5.4%，11.2% | 1.6%，0.2% | 0.6%，0.5% | 29.9%，8.2% |
 | holdback 用 Privacy Filter | 0.3%，3.2% | 14.4%，17.5% | 12.7%，11.1% | 10.9%，0.3% | 9.7%，0.6% | 32.4%，10.2% |
 
-PII Bench ZH 和 Nemotron-PII 的另一部分数据参与了蒸馏模型的训练，所以对它来说这两列不算留出检验。
+400 条 PII Bench ZH 中有 300 条是蒸馏模型的训练数据，它的训练也用了 Nemotron-PII 的训练集，所以对它来说这两列不算留出检验。
 
 | 任务成功率（跑 1 次，186 个任务） | 原文 | Codex 规则 | Presidio | rehydra | holdback 用 Privacy Filter |
 | --- | --- | --- | --- | --- | --- |

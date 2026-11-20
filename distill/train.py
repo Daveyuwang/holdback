@@ -1,12 +1,8 @@
 """Train the student on data/natural.jsonl and data/constructed.jsonl, from the first layers of
-intfloat/multilingual-e5-small with its vocabulary cut to the pieces the training text uses.
+intfloat/multilingual-e5-small with its vocabulary cut to the pieces the training text uses. A row's labels are the
+Privacy Filter's spans in its `teacher` field, if it has one, plus every labeled value those spans do not touch.
 
---targets chooses the labels on natural text: "teacher" uses the Privacy Filter's spans alone (plain distillation),
-"gold" only the dataset's labels and the planted values, "union" adds the dataset's labels wherever the teacher found
-nothing, and "mix", the published recipe, is "union" on the public sets and "gold" on the developer text. Constructed
-rows keep their exact labels under every setting.
-
-Usage: uv run --group distill python distill/train.py OUT_DIR [--targets mix] [--seed 0]"""
+Usage: uv run --group distill python distill/train.py OUT_DIR [--seed 0]"""
 import argparse
 import json
 import random
@@ -20,23 +16,18 @@ from transformers import get_linear_schedule_with_warmup
 from student import BODY, DEVICE, batches, load, prune, save, token_labels
 
 HERE = Path(__file__).parent
-CONSTRUCTED = ("lock", "contrast", "agent", "secret", "zh_docs")
 
 
-def targets(row, mode):
-    if mode == "gold" or row["source"] in CONSTRUCTED or (mode == "mix" and row["source"] == "dev"):
-        return [list(g) for g in row["gold"]]
-    spans = [list(s) for s in row["teacher"]]
-    if mode != "teacher":  # labeled values the teacher did not find at all
-        spans += [g for g in row["gold"] if not any(g[0] < e and s < g[1] for s, e, _ in row["teacher"])]
-    return spans
+def targets(row):
+    teacher = row.get("teacher", [])
+    return teacher + [g for g in row["gold"] if not any(g[0] < e and s < g[1] for s, e, _ in teacher)]
 
 
-def windows(tok, rows, mode):
+def windows(tok, rows):
     ids, labels = [], []
     for row in rows:
         enc = tok(row["text"], add_special_tokens=False, return_offsets_mapping=True)
-        lab = token_labels(enc["offset_mapping"], targets(row, mode))
+        lab = token_labels(enc["offset_mapping"], targets(row))
         for i in range(0, len(lab), BODY):
             ids.append(enc["input_ids"][i:i + BODY])
             labels.append(lab[i:i + BODY])
@@ -66,7 +57,6 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--init", default="intfloat/multilingual-e5-small")
     ap.add_argument("--layers", type=int, default=6)
-    ap.add_argument("--targets", default="mix", choices=["mix", "union", "teacher", "gold"])
     ap.add_argument("--epochs", type=int, default=3)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--batch", type=int, default=32)
@@ -88,8 +78,8 @@ def main():
     model.to(DEVICE)
     if DEVICE == "mps":  # a cap, so a run cannot push the rest of the Mac into swap; about 8 GB on a 24 GB Mac
         torch.mps.set_per_process_memory_fraction(0.45)
-    val = windows(tok, rows[:held], a.targets)
-    ids, labels = windows(tok, rows[held:], a.targets)
+    val = windows(tok, rows[:held])
+    ids, labels = windows(tok, rows[held:])
     print(f"{len(rows) - held} texts, {len(ids)} windows, {sum(map(len, ids)) / 1e6:.1f}M tokens; validation {len(val[0])} windows on {DEVICE}", flush=True)
 
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.01)

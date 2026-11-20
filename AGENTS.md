@@ -8,7 +8,8 @@ file covers how to work on the code.
 
 | Path | Contents |
 | --- | --- |
-| `rust/holdback/src/main.rs` | CLI: `serve`, `run claude\|codex`, `status`, `review`, `keep`, `replace`, `hook`, `setup`, `doctor`, `spans <json>`; model download |
+| `rust/holdback/src/main.rs` | CLI: `serve`, `run claude\|codex`, `status`, `review`, `keep`, `replace`, `hook`, `setup`, `doctor`, `spans <json>` |
+| `rust/holdback/src/models.rs` | The two detectors' models: pinned revisions and SHA-256 sums, the choice by `HOLDBACK_DETECTOR`, the download and the cache's revision marker |
 | `rust/holdback/src/native.rs` | The Privacy Filter runtime: memory-mapped q4 weights, Accelerate on macOS, `gemm` elsewhere |
 | `rust/holdback/src/detect.rs` | The Privacy Filter's tokenizing, 128-token windows that end at a line break, separator or space where they can, Viterbi decoding into spans; `Detector` is either detector |
 | `rust/holdback/src/student.rs` | The distilled model, the default detector: a 6-layer BERT encoder run from its memory-mapped safetensors file, its own tokenizer, 254-token windows, BIO labels into spans |
@@ -36,8 +37,10 @@ cargo test --release
 
 The tests run both detectors, so download both once: `holdback serve` fetches the distilled model (about 115 MB)
 to `~/.cache/holdback/holdback-student`, and `HOLDBACK_DETECTOR=privacy-filter holdback serve` the Privacy Filter
-(about 0.9 GB) to `~/.cache/holdback/privacy-filter-q4`. `main.rs` pins both models' revisions and SHA-256 sums;
-a new published model means new pins there and a new fixture from `distill/fixture.py`. CI runs the same steps on
+(about 0.9 GB) to `~/.cache/holdback/privacy-filter-q4`. The parity tests read these caches even when
+`HOLDBACK_STUDENT_DIR` or `HOLDBACK_MODEL_DIR` is set, because their fixtures belong to the pinned files.
+`models.rs` pins both models' revisions and SHA-256 sums; a new published model means new pins there and a new
+fixture from `distill/fixture.py`. CI runs the same steps on
 Linux on every push. The release workflow builds all four targets and checks macOS
 and Linux on clean runners; it runs on a tag and on request, because macOS minutes cost more. Check macOS
 locally before a normal push.
@@ -87,10 +90,9 @@ uv run python bench/task_eval.py --runs 1          # calls model APIs
 `check_hooks.py` needs a logged-in `claude` command and starts what it needs.
 `check_proxy.py` and `check_agents.py` need a running proxy with `HOLDBACK_DUMP` set; each docstring has the
 command. The bench scripts run the release binary, so run `cargo build --release` after a change; `cargo test` does not
-rebuild it. Results go to `bench/results/`, which is ignored by git. Span results are cached there by name, so delete the
-holdback span files (`spans_seed*.json`, `dev*_spans.json`, `*_spans_400.json` without a tool prefix, and their
-`privacy_filter_` and `student_` copies, which the other detectors write) after changing a rule. The rules were tuned on the generated tasks, so
-the public sets are the held-out check: report both.
+rebuild it. Results go to `bench/results/`, which is ignored by git. holdback's spans are cached there per
+detector and computed again when the texts, the release binary or the model file change. The rules were tuned on
+the generated tasks, so the public sets are the held-out check: report both.
 
 ## Configuration
 
@@ -100,8 +102,8 @@ the public sets are the held-out check: report both.
 | `HOLDBACK_UPSTREAMS` | Extra upstreams, `name=https://host/base,other=...` |
 | `HOLDBACK_KEY_ENV` | Variable that holds the upstream key for `run codex`, default `OPENAI_API_KEY` |
 | `HOLDBACK_DETECTOR` | `distilled` (default) or `privacy-filter` |
-| `HOLDBACK_STUDENT_DIR` | The distilled model's directory instead of the cache: `config.json`, `model.safetensors` (f32) and `tokenizer.json`. The published model is [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student); `distill/` trains it |
-| `HOLDBACK_MODEL_DIR` | The Privacy Filter's directory instead of the cache |
+| `HOLDBACK_STUDENT_DIR` | The distilled model's directory instead of the cache: `config.json`, `model.safetensors` (f32) and `tokenizer.json`. holdback only reads it and stops with an error when a file is missing. The published model is [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student); `distill/` trains it |
+| `HOLDBACK_MODEL_DIR` | The Privacy Filter's directory instead of the cache, read the same way |
 | `HF_ENDPOINT` | A Hugging Face mirror to download the models from |
 | `HOLDBACK_DUMP` | Append each redacted upstream request to this file, for the checks |
 | `HOLDBACK_HOOKS` | `1` switches hook mode on for sessions that are not routed through the proxy |

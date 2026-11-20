@@ -57,17 +57,32 @@ pub async fn doctor(port: u16) -> Result<()> {
         false => say("FIX", format!("the holdback command is not on PATH: add {} to PATH in your shell profile", exe.parent().unwrap().display())),
     }
 
-    match crate::chosen() {
-        Err(e) => say("FIX", format!("{e}")),
-        Ok(model) => match model.missing().is_empty() {
-            true => say("ok", format!("the {} detector is in {}", model.name, model.dir().display())),
-            false => say("note", format!("the {} detector is not downloaded yet; the first start downloads {} to {}", model.name, model.size, model.dir().display())),
+    // the variables a session in this folder starts holdback with: Claude Code's settings env (user, then project,
+    // then local, later ones winning) over this shell's
+    let here = std::env::current_dir()?;
+    let mut env = serde_json::Map::new();
+    for file in [claude_dir().join("settings.json"), here.join(".claude/settings.json"), here.join(".claude/settings.local.json")] {
+        env.extend(read_json(&file)["env"].as_object().cloned().unwrap_or_default());
+    }
+    let var = |k: &str| env.get(k).and_then(Value::as_str).map(String::from).or_else(|| std::env::var(k).ok()).filter(|v| !v.is_empty());
+    match crate::models::named(&var("HOLDBACK_DETECTOR").unwrap_or_default()) {
+        Err(e) => say("FIX", e.to_string()),
+        Ok(model) => match var(model.dir_var) {
+            Some(dir) => match model.absent(Path::new(&dir)) {
+                absent if absent.is_empty() => say("ok", format!("the {} detector is in {dir}, which {} names", model.name, model.dir_var)),
+                absent => say("FIX", format!("{} is {dir}, which has no {}: point it at a complete copy, or unset it to use the download", model.dir_var, absent.join(", "))),
+            },
+            None if model.cached() => say("ok", format!("the {} detector is in {}", model.name, model.cache_dir().display())),
+            None => say("note", format!("the first start downloads the {} detector ({}) to {}, keeping files already there that match", model.name, model.size, model.cache_dir().display())),
         },
+    }
+    if var("HOLDBACK_DETECTOR").is_none() && var(crate::models::PRIVACY_FILTER.dir_var).is_some() {
+        say("note", "HOLDBACK_MODEL_DIR is set, but the default detector is the distilled model: set HOLDBACK_DETECTOR=privacy-filter to run the Privacy Filter".into());
     }
 
     let status = crate::ask(port, "status").await;
     match &status {
-        Some(st) if st["version"] == VERSION => say("ok", format!("the local process is running on port {port} with the {} detector", st["detector"].as_str().unwrap_or("privacy-filter"))),
+        Some(st) if st["version"] == VERSION => say("ok", format!("the local process is running on port {port} with the {} detector", st["detector"].as_str().unwrap_or("?"))),
         Some(st) => say("FIX", format!("the local process on port {port} is version {}, this command is {VERSION}: stop it with `pkill -f \"holdback serve\"`; the next session starts the new one", st["version"].as_str().unwrap_or("older than 0.1.0"))),
         None => say("note", format!("no local process on port {port}; a session or `holdback run` starts it")),
     }
@@ -75,7 +90,6 @@ pub async fn doctor(port: u16) -> Result<()> {
     if claude(&["--version"]).is_none() {
         say("note", "the claude command is not on PATH, so Claude Code was not checked".into());
     } else {
-        let here = std::env::current_dir()?;
         let installed = plugins();
         let active: Vec<&Value> = installed.iter().filter(|p| p["enabled"] == true && (p["scope"] == "user" || p["projectPath"].as_str().is_some_and(|d| Path::new(d) == here))).collect();
         match active.first() {
@@ -85,11 +99,6 @@ pub async fn doctor(port: u16) -> Result<()> {
                 say("FIX", format!("the Claude Code plugin is {}, older than {MIN_PLUGIN}: run `claude plugin marketplace update holdback` and `claude plugin update holdback@holdback`", p["version"]))
             }
             Some(p) => say("ok", format!("the Claude Code plugin {} is on for this folder ({} scope)", p["version"].as_str().unwrap_or("?"), p["scope"].as_str().unwrap_or("?"))),
-        }
-        // settings env for a session in this folder: user, then project, then local, later ones winning
-        let mut env = serde_json::Map::new();
-        for file in [claude_dir().join("settings.json"), here.join(".claude/settings.json"), here.join(".claude/settings.local.json")] {
-            env.extend(read_json(&file)["env"].as_object().cloned().unwrap_or_default());
         }
         let hooks = !active.is_empty() && env.get("HOLDBACK_HOOKS").and_then(Value::as_str) == Some("1");
         let routed = env.get("ANTHROPIC_BASE_URL").and_then(Value::as_str).is_some_and(|u| u.starts_with(&format!("http://127.0.0.1:{port}/")));
