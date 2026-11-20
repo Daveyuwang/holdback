@@ -4,9 +4,9 @@
 
 - holdback's default detector is now a distilled model of 28M parameters, trained on public data to label what
   OpenAI's Privacy Filter labels. It is a 115 MB download instead of 0.9 GB, handles a request 6 to 7 times faster,
-  and misses fewer values in English and Chinese: 1.0% and 5.8% on the two public sets it never trained on, against
-  9.7% and 12.7%. It misses more in French, German, Italian, Spanish and Dutch; `HOLDBACK_DETECTOR=privacy-filter`
-  brings back the Privacy Filter.
+  and misses fewer values in English and Chinese: 1.0% and 5.8% on the two English public sets it never trained on,
+  against 9.7% and 12.7%, and 8.7% of the names in Chinese news text, against 67.3%. It misses more in French,
+  German, Italian, Spanish and Dutch; `HOLDBACK_DETECTOR=privacy-filter` brings back the Privacy Filter.
 - The first start downloads the model from Hugging Face at a pinned revision and checks each file's SHA-256.
   `HF_ENDPOINT` points the download at a mirror, and `HOLDBACK_STUDENT_DIR` names a folder with your own copy. A
   Privacy Filter download from 0.1.x is checked and kept.
