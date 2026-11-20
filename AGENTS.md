@@ -21,6 +21,7 @@ file covers how to work on the code.
 | `rust/holdback/src/server.rs` | axum proxy, streaming rewrite, status page at `/_holdback` |
 | `plugins/claude-code` | Claude Code plugin: starts the proxy, runs hook mode, `/holdback:status` |
 | `bench` | Python benchmark and real-agent checks; they call the `holdback` binary |
+| `distill` | The distilled student's training data from pinned public sources, its training, and test sets beyond the benchmarks; see `distill/README.md` |
 
 The redaction rules exist only in Rust. The bench scripts get detector and rule output from `holdback spans`.
 
@@ -66,6 +67,7 @@ Run the checks that cover what changed.
 | --- | --- |
 | `native.rs`, `detect.rs` | `cargo test`; a runtime change must not move benchmark numbers, a change to the windows is checked like a rule change |
 | `student.rs` | `HOLDBACK_STUDENT_DIR=<model dir> cargo test --release` (the logits test is skipped without it), then the benchmarks with the variable set |
+| `distill/` | Rebuild the data and train; then the benchmarks with `HOLDBACK_STUDENT_DIR` and `distill/heldout.py`, against the model card's numbers |
 | `precision.rs` | `bench/detect_eval.py` (also `--seed 11`), `bench/public_eval.py` and `bench/dev_eval.py` (also `--held-out`) |
 | `vault.rs`, the known-values pass | `bench/public_eval.py --sequence`, which runs each set through one map in order |
 | `protocols.rs`, `server.rs` | `bench/check_proxy.py`, then `bench/check_agents.py` with Claude Code and Codex |
@@ -83,7 +85,8 @@ uv run python bench/task_eval.py --runs 1          # calls model APIs
 `check_proxy.py` and `check_agents.py` need a running proxy with `HOLDBACK_DUMP` set; each docstring has the
 command. The bench scripts run the release binary, so run `cargo build --release` after a change; `cargo test` does not
 rebuild it. Results go to `bench/results/`, which is ignored by git. Span results are cached there by name, so delete the
-holdback span files (`spans_seed*.json`, `dev*_spans.json`, `*_spans_400.json` without a tool prefix) after changing a rule. The rules were tuned on the generated tasks, so
+holdback span files (`spans_seed*.json`, `dev*_spans.json`, `*_spans_400.json` without a tool prefix, and their `student_` copies, which the
+distilled model writes) after changing a rule. The rules were tuned on the generated tasks, so
 the public sets are the held-out check: report both.
 
 ## Configuration
@@ -94,7 +97,7 @@ the public sets are the held-out check: report both.
 | `HOLDBACK_UPSTREAMS` | Extra upstreams, `name=https://host/base,other=...` |
 | `HOLDBACK_KEY_ENV` | Variable that holds the upstream key for `run codex`, default `OPENAI_API_KEY` |
 | `HOLDBACK_MODEL_DIR` | Model directory instead of the cache |
-| `HOLDBACK_STUDENT_DIR` | Use the distilled student instead of the Privacy Filter: a directory with `config.json`, `model.safetensors` (f32) and `tokenizer.json`. Experimental; the model is [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student) on Hugging Face, its training code is not in this repository yet |
+| `HOLDBACK_STUDENT_DIR` | Use the distilled student instead of the Privacy Filter: a directory with `config.json`, `model.safetensors` (f32) and `tokenizer.json`. Experimental; the model is [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student) on Hugging Face, its training code is in `distill/` |
 | `HOLDBACK_DUMP` | Append each redacted upstream request to this file, for the checks |
 | `HOLDBACK_HOOKS` | `1` switches hook mode on for sessions that are not routed through the proxy |
 | `HOLDBACK_STATE_DIR` | Where hook mode saves its placeholder map, default `~/.local/state/holdback` |

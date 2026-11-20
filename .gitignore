@@ -5,3 +5,5 @@ bench/results/
 .DS_Store
 rust/**/target/
 node_modules/
+distill/data/
+distill/runs/

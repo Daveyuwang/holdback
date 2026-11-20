@@ -82,7 +82,7 @@ planned.
 An experimental distilled detector can replace the Privacy Filter. It is smaller and faster and finds more
 Chinese names, but it is not the default yet. Download it from
 [Hugging Face](https://huggingface.co/limbo23/holdback-student) and point `HOLDBACK_STUDENT_DIR` at its folder;
-the model card has the commands and the measurements.
+the model card has the commands and the measurements, and [distill/](distill/README.md) the code that trains it.
 
 ## Claude Code
 

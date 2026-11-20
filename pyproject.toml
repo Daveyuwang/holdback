@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 dependencies = ["anthropic>=2.8.0", "openai>=3.51.0"]
 
 [dependency-groups]
+# distill/: training the distilled detector. Faker is pinned exactly because the generated rows depend on its data.
+distill = ["datasets>=5.2", "faker==40.54.0", "torch>=2.15", "transformers>=5.23"]
 compare = [
     "presidio-analyzer>=2.2",
     "en-core-web-lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl",

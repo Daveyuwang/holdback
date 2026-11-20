@@ -28,8 +28,8 @@ What the release rests on:
 1. The distilled detector is on [Hugging Face](https://huggingface.co/limbo23/holdback-student) and runs behind
    `HOLDBACK_STUDENT_DIR`. In the first measurements it missed 13% of the Chinese names in a news test set where
    the Privacy Filter missed 67%, though it takes more common words for names. It found secrets in code about as
-   often and checked text 7 to 14 times faster on an Apple M5. Still to do: publish its training and evaluation
-   code, and decide whether it becomes the default.
+   often and checked text 7 to 14 times faster on an Apple M5. Its training and evaluation code is in
+   `distill/`. Still to do: decide whether it becomes the default.
 2. Widen the real-session benchmark: other languages, larger tool output, more kinds of tools.
 3. Homebrew and npm packages, when asked for.
 

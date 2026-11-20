@@ -33,13 +33,15 @@ def cached(name: str, compute):
 def spans(texts: list[str], name: str, sequence: bool = False) -> list[dict]:
     """holdback, for each text: {"detected": the detector alone, "refined": with holdback's rules}.
     With sequence, the texts go through one placeholder map in order and each text gets {"all", "twice"}: what
-    is replaced when a known value is replaced everywhere, or when a one-word person waits for a second text."""
+    is replaced when a known value is replaced everywhere, or when a one-word person waits for a second text.
+    With HOLDBACK_STUDENT_DIR set, the binary runs that distilled model, cached under names starting with student_."""
     def compute():
         with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
             json.dump({"texts": texts, "sequence": sequence}, f, ensure_ascii=False)
             f.flush()
             return json.loads(subprocess.run([BINARY, "spans", f.name], capture_output=True, text=True, check=True).stdout)
-    return cached(name + "_sequence" * sequence, compute)
+    student = "student_" if os.environ.get("HOLDBACK_STUDENT_DIR") else ""
+    return cached(student + name + "_sequence" * sequence, compute)
 
 
 def codex(texts: list[str], name: str) -> list:
