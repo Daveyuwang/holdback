@@ -287,13 +287,14 @@ maintainers' names and emails found in them.
 
 | Real sessions, 45 tasks | Passed, hook mode on | Passed, hook mode off | Planted secrets sent | Maintainers' details sent | Saved values that are wrong |
 | --- | --- | --- | --- | --- | --- |
-| Haiku 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
-| Sonnet 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
+| Haiku 5.5 | 45 | 45 | 0 | 2 | 2 of 50 |
+| Sonnet 5.5 | 45 | 45 | 0 | 2 | 1 of 45 |
 | Opus 5.5 | 45 | 45 | 0 | 2 | 1 of 46 |
 
 A task took 4 to 6 seconds on average with hook mode on or off. The two maintainers' details sent are the lone first
-name and the handle that holdback keeps; with the Privacy Filter, Haiku's sessions sent 7. The wrong value, the
-same on every model, is a model name in tiktoken-rs (`gpt-4o`) taken for a secret.
+name and the handle that holdback keeps; with the Privacy Filter, Haiku's sessions sent 7. The wrong value saved
+on every model is a model name in tiktoken-rs (`gpt-4o`) taken for a secret; Haiku's second is a 38-digit
+constant in itoa taken for an account number.
 These tasks are short, about 1 KB per tool result, and all in Rust crates. The rules were tuned on this harness:
 its first run had 16% wrong values, a database host and a file name among them.
 
@@ -333,7 +334,7 @@ their own, such as dates, occupation, country and organization, are not counted.
 | Codex patterns | 91.7%, 0.0% | 100.0%, 0.0% | 99.9%, 0.0% | 99.8%, 0.0% | 100.0%, 0.0% | 93.1%, 0.2% |
 | Presidio | 38.9%, 60.8% | 66.1%, 10.3% | 32.6%, 9.8% | 19.5%, 1.1% | 8.1%, 4.5% | 83.5%, 11.6% |
 | rehydra | 16.7%, 39.2% | 50.8%, 6.6% | 38.4%, 7.8% | 31.2%, 0.3% | 19.3%, 0.6% | 77.4%, 5.4% |
-| holdback | 0.0%, 3.2% | 0.0%, 16.9% | 5.8%, 11.2% | 1.6%, 0.2% | 1.0%, 0.5% | 30.1%, 6.6% |
+| holdback | 0.0%, 3.2% | 0.0%, 16.9% | 5.8%, 11.2% | 1.6%, 0.2% | 1.0%, 0.5% | 30.1%, 6.7% |
 | holdback with the Privacy Filter | 0.3%, 3.2% | 14.4%, 17.3% | 12.8%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
 
 The distilled model trained on other rows of PII Bench ZH and on Nemotron-PII's training split, so those two

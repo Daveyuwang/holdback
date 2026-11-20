@@ -124,7 +124,7 @@ writes the placeholder it was given, and holdback puts the real value back.
 | Presidio | 66.1%, 10.3% | 32.6%, 9.8% | 19.5%, 1.1% | 8.1%, 4.5% | 83.5%, 11.6% |
 | rehydra | 50.8%, 6.6% | 38.4%, 7.8% | 31.2%, 0.3% | 19.3%, 0.6% | 77.4%, 5.4% |
 | holdback with the Privacy Filter | 14.4%, 17.3% | 12.8%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
-| holdback | 0.0%, 16.9% | 5.8%, 11.2% | 1.6%, 0.2% | 1.0%, 0.5% | 30.1%, 6.6% |
+| holdback | 0.0%, 16.9% | 5.8%, 11.2% | 1.6%, 0.2% | 1.0%, 0.5% | 30.1%, 6.7% |
 
 The distilled model trained on other rows of PII Bench ZH and on Nemotron-PII's training split, so those two
 columns are not held out for it. On sets no training row comes from, it misses fewer values than the teacher:
@@ -142,8 +142,8 @@ either corpus.
 
 **Real sessions.** Claude Code runs headless on copies of nine public Rust crates, five checkable tasks each, with
 the requests recorded on their way to the provider. With hook mode on, Haiku 5.5, Sonnet 5.5 and Opus 5.5 pass 45 of
-45 tasks, as with it off; no planted secret reaches the provider. Of the 46 values hook mode saves per model,
-one is wrong, a model name taken for a secret.
+45 tasks, as with it off; no planted secret reaches the provider. Of the 45 to 50 values hook mode saves per model,
+one or two are wrong: a model name taken for a secret, and on Haiku a 38-digit constant taken for an account number.
 
 **Cost.** The proxy answers 0.03 seconds after it starts, idles at about 40 MB, adds about 15 ms to a request of 900
 characters and 0.4 seconds to a first request of 48,000 characters, against 76 ms and 3.1 seconds with the Privacy

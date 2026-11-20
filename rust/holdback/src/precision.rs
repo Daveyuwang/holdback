@@ -272,6 +272,16 @@ fn protected(text: &str, rules: &[Span]) -> Vec<Range> {
     out
 }
 
+/// The whole run of digits around an account number that is only a piece of it.
+fn whole_number(text: &str, sp: &Span) -> Option<Span> {
+    if sp.label != "account_number" || !text[sp.start..sp.end].bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let start = sp.start - text[..sp.start].bytes().rev().take_while(u8::is_ascii_digit).count();
+    let end = sp.end + text[sp.end..].bytes().take_while(u8::is_ascii_digit).count();
+    (start < sp.start || end > sp.end).then(|| Span { start, end, label: sp.label.clone() })
+}
+
 /// Whether `start..end` is a number of up to six digits standing alone, such as a count, a process id or a size: no
 /// other letter or digit in its word (the rest of `756.8847.7647.90`, `14355` or `CH-9555`), no other span next to it
 /// (half of a phone number is not alone), and nothing on its line before it that names something private, such as an
@@ -335,6 +345,16 @@ pub fn refine(text: &str, spans: &[Span]) -> Vec<Span> {
         .collect();
     let mut kept = vec![];
     for sp in spans {
+        // a piece of a longer number stands for the whole number: `43` alone in the constant
+        // `76624777043294442917917351357515459181` would break it, and would then be replaced wherever 43 appears
+        let whole;
+        let sp = match whole_number(text, sp) {
+            Some(run) => {
+                whole = run;
+                &whole
+            }
+            None => sp,
+        };
         // a file path is not a URL; replacing it leaves an agent unable to name the files next to it
         if sp.label == "private_url" && paths.iter().any(|&(s, e)| s < sp.end && sp.start < e) {
             continue;
@@ -452,6 +472,11 @@ mod tests {
         assert!(!replaced("-rwxr-xr-x  1 root  wheel  196320 Aug 12 21:51 bputil", "bputil", "private_person"));
         assert!(!replaced("const SWIGLU_ALPHA: f32 = 1.702;", "SWIGLU_ALPHA", "private_person"));
         assert!(!replaced("curl -sSL https://example.com/install.sh", "sSL", "secret"));
+        let constant = "const M_HIGH: u128 = 76624777043294442917917351357515459181;";
+        let at = constant.find("7515").unwrap();
+        let piece = Span { start: at, end: at + 4, label: "account_number".into() };
+        let whole: Vec<&str> = super::refine(constant, &[piece]).iter().map(|s| &constant[s.start..s.end]).collect();
+        assert_eq!(whole, ["76624777043294442917917351357515459181"]);
         assert!(replaced("mysql -uroot -pS3cr3tPa55 orders", "pS3cr3tPa55", "secret"));
         assert!(replaced("good call <@U02LIZ_MARCHETTI>, thanks", "U02LIZ_MARCHETTI", "private_person"));
         assert!(super::refine("tiktoken-rs = \"0.12.1\"\nmax_tokens = 100000\ntokenizer = \"o200k_base\"", &[]).is_empty());
