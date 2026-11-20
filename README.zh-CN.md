@@ -151,10 +151,10 @@ HOLDBACK_KEY_ENV=BAILIAN_API_KEY holdback run codex --upstream bailian -m qwen3.
 
 ## 已知局限
 
-- 在蒸馏模型没有训练过的两个个人信息公开数据集上，holdback 漏掉 0.6%（PrivacyBench）和 5.4%（ai4privacy 英文部分）的标注值。ai4privacy 上漏掉的大多是城市、邮编、用户名和出生日期。它在 [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) 和 Nemotron-PII 上的数字不算留出检验：基准里 400 条 PII Bench ZH 中有 300 条是训练数据，训练也用了 Nemotron-PII 的训练集。
-- 蒸馏模型不会替换 crate 的 `Cargo.toml` 里 `authors` 列表中的姓名和邮箱，因为它的训练文本把这些标成了非隐私内容。在 `bench/real_eval.py` 用到的九个 crate 的清单里，12 个姓名和 12 个邮箱它一个都没替换，Privacy Filter 替换了 8 个姓名和 11 个邮箱（`bench/dev_eval.py --authors`）。在 Haiku 用钩子模式处理这些 crate 的会话里，这 24 个值全部发到了服务商（`bench/real_eval.py`）。设置 `HOLDBACK_DETECTOR=privacy-filter` 或用 `holdback replace` 可以补上。
-- 在法语、德语、意大利语、西班牙语和荷兰语文本上，蒸馏模型比 Privacy Filter 漏得多：漏掉 11% 到 18% 的标注值，Privacy Filter 是 5% 到 16%，漏的主要是出生日期、门牌号、邮编和证件号（每种语言取 ai4privacy 的 100 行，见 `distill/heldout.py`）。处理这类文本时请设置 `HOLDBACK_DETECTOR=privacy-filter`。韩文、阿拉伯文、印地文等其他文字还没有测过。
-- 在中文文本里，蒸馏模型有时会把普通词当成人名：在新闻文本上误替换了 2.5% 的其他字符，Privacy Filter 是 0.6%（`distill/heldout.py`）。
+- 在蒸馏模型没有训练过的两个个人信息公开数据集上，holdback 漏掉 1.0%（PrivacyBench，都是人名）和 5.8%（ai4privacy 英文部分，大多是城市、邮编、出生日期和门牌号）的标注值。
+- 在法语、德语、意大利语、西班牙语和荷兰语文本上，蒸馏模型比 Privacy Filter 漏得多：漏掉 9% 到 18% 的标注值，Privacy Filter 是 5% 到 16%，漏的主要是出生日期、门牌号、邮编和证件号（每种语言取 ai4privacy 的 100 行，见 `distill/heldout.py`）。处理这类文本时请设置 `HOLDBACK_DETECTOR=privacy-filter`。韩文、阿拉伯文、印地文等其他文字还没有测过。
+- 在中文文本里，蒸馏模型有时会把普通词当成人名：在新闻文本上误替换了 1.5% 的其他字符，Privacy Filter 是 0.6%（`distill/heldout.py`）。
+- 在 `authors` 列表里，蒸馏模型不替换单独的名或单个词的用户名：`bench/dev_eval.py --authors` 的 14 个名字里有 2 个。
 - [CredData](https://github.com/Samsung/CredData) 收集的是源码文件里的密钥，holdback 在上面漏掉 30%。其中一半以上是 UUID，holdback 有意保留它们，因为 agent 要拿 UUID 当标识符用。
 - 长文本第一次发送时最慢，在 Apple 芯片的 Mac 上，一个 4.8 万字符的文件要多花约 0.4 秒。之后的请求会复用这次的结果；和之前的文本只差一点的内容，比如编辑后的文件，只需要处理变动的部分，13 KB 的文件约 25 毫秒。
 - 公众人物的名字有时会被替换。单独出现的数字也会，比如一个计数或进程号，检测模型可能把它当成账号。
@@ -191,7 +191,7 @@ uv run python bench/task_eval.py --runs 1        # 五种条件下的任务成�
 
 | 生成文本上的检测 | 隐私值泄露（共 288） | 必需信息被替换（共 186） |
 | --- | --- | --- |
-| 只用蒸馏模型 | 8.0% | 25.3% |
+| 只用蒸馏模型 | 5.2% | 22.6% |
 | 蒸馏模型加 holdback 规则 | 0.0% | 3.2% |
 | 换一批新实例（`--seed 11`） | 0.0% | 3.2% |
 | Privacy Filter 加 holdback 规则 | 0.3% | 3.2% |
@@ -211,24 +211,26 @@ uv run python bench/task_eval.py --runs 1        # 五种条件下的任务成�
 
 | 开发输出 | 每 100 KB 的误替换数 | 预埋值泄漏 |
 | --- | --- | --- |
-| 调参语料，只用检测模型 | 17 | 39 个里 0 个 |
-| 调参语料，加上 holdback 的规则 | 4 | 39 个里 0 个 |
+| 调参语料，只用检测模型 | 13 | 39 个里 0 个 |
+| 调参语料，加上 holdback 的规则 | 3 | 39 个里 0 个 |
 | 留出语料，只用检测模型 | 31 | 45 个里 0 个 |
 | 留出语料，加上 holdback 的规则 | 2 | 45 个里 0 个 |
 
-规则是对着第一份语料调的。留出语料是三个 crate 的源码、一个 npm 锁文件和另一批命令的输出；只用蒸馏模型时，它会把 npm 锁文件里的完整性哈希当成密钥，规则会把这些哈希保留下来。换成 Privacy Filter，加上规则后每 100 KB 的误替换分别是 7 个和 0 个。
+规则是对着第一份语料调的。留出语料是三个 crate 的源码、一个 npm 锁文件和另一批命令的输出；只用蒸馏模型时，它会把 npm 锁文件里的完整性哈希当成密钥，规则会把这些哈希保留下来。换成 Privacy Filter，加上规则后每 100 KB 的误替换分别是 3 个和 0 个。
+
+开发文本里也有真人的信息。`bench/dev_eval.py --authors` 统计 `bench/real_eval.py` 用到的九个 crate 的 `authors` 列表里有多少维护者信息被替换：14 个名字 holdback 替换了 12 个，12 个邮箱全部替换；换成 Privacy Filter 是 8 个名字和 11 个邮箱。两者都没替换的是一个单独的名（没有姓）和一个单词的用户名。其中四位维护者的信息也出现在蒸馏模型的训练文本里，来自他们维护的其他 crate；其余的它同样替换了。
 
 `bench/real_eval.py` 跑的是真实的智能体会话：让 Claude Code 以无界面方式在九个公开 crate 的副本上各做五个任务，
 钩子模式开和关各跑一遍。每个任务都有程序能验证的检查，比如把清单里的维护者写进一个文件，或者改掉预埋 `.env`
 里的端口而不动密码。发往服务商的请求全部记录下来，脚本会统计其中出现的预埋密钥和维护者的姓名、邮箱。
 
-| 真实会话，45 个任务 | 钩子模式开，通过 | 钩子模式关，通过 | 发出的预埋值 | 存下的值里错的 |
-| --- | --- | --- | --- | --- |
-| Haiku 5.5 | 45 | 45 | 0 | 44 个里 1 个 |
-| Sonnet 5.5 | 44 | 45 | 0 | 44 个里 1 个 |
-| Opus 5.5 | 45 | 45 | 0 | 44 个里 1 个 |
+| 真实会话，45 个任务 | 钩子模式开，通过 | 钩子模式关，通过 | 发出的预埋密钥 | 发出的维护者信息 | 存下的值里错的 |
+| --- | --- | --- | --- | --- | --- |
+| Haiku 5.5 | 45 | 45 | 0 | 2 | 48 个里 1 个 |
+| Sonnet 5.5 | 45 | 45 | 0 | 2 | 48 个里 1 个 |
+| Opus 5.5 | 45 | 45 | 0 | 2 | 48 个里 1 个 |
 
-钩子模式开或关，一个任务都是 3 到 7 秒。Sonnet 没通过的那个是构建任务，离线状态下解析不了一个依赖。三个模型存错的是同一个值：tiktoken-rs 里的一个测试字符串被当成了密钥。这些任务都很短，每个工具结果约 1 KB，而且全是 Rust crate。规则是对着这套
+钩子模式开或关，一个任务平均 4 到 6 秒。发出的两条维护者信息，就是 holdback 没替换的那个单独的名和那个用户名；换成 Privacy Filter，Haiku 的会话发出了 7 条。三个模型存错的是同一个值：tiktoken-rs 里的模型名 `gpt-4o` 被当成了密钥。这些任务都很短，每个工具结果约 1 KB，而且全是 Rust crate。规则是对着这套
 检查调过的：第一次跑时有 16% 的值是错的，其中有数据库主机名和文件名。
 
 `bench/check_proxy.py` 和 `bench/check_agents.py` 让真实的 SDK 客户端、Claude Code 和 Codex 经过运行中的代理执行任务，并检查有没有隐私值到达上游。`bench/check_hooks.py` 对钩子模式做同样的检查。具体命令写在各脚本开头的说明里。
@@ -255,10 +257,10 @@ uv run python bench/task_eval.py --runs 1 --conds raw,codex,presidio,rehydra,ref
 | Codex 规则 | 91.7%，0.0% | 100.0%，0.0% | 99.9%，0.0% | 99.8%，0.0% | 100.0%，0.0% | 93.1%，0.2% |
 | Presidio | 38.9%，60.8% | 66.1%，10.3% | 32.6%，9.8% | 19.5%，1.1% | 8.1%，4.5% | 83.5%，11.6% |
 | rehydra | 16.7%，39.2% | 50.8%，6.6% | 38.4%，7.8% | 31.2%，0.3% | 19.3%，0.6% | 77.4%，5.4% |
-| holdback | 0.0%，3.2% | 0.0%，18.2% | 5.4%，11.2% | 1.6%，0.2% | 0.6%，0.5% | 29.9%，8.2% |
+| holdback | 0.0%，3.2% | 0.0%，16.9% | 5.8%，11.3% | 1.6%，0.2% | 1.0%，0.5% | 30.1%，6.6% |
 | holdback 用 Privacy Filter | 0.3%，3.2% | 14.4%，17.5% | 12.7%，11.1% | 10.9%，0.3% | 9.7%，0.6% | 32.4%，10.2% |
 
-400 条 PII Bench ZH 中有 300 条是蒸馏模型的训练数据，它的训练也用了 Nemotron-PII 的训练集，所以对它来说这两列不算留出检验。
+蒸馏模型训练时用了 PII Bench ZH 的其他行和 Nemotron-PII 的训练集，所以对它来说这两列不算留出检验。
 
 | 任务成功率（跑 1 次，186 个任务） | 原文 | Codex 规则 | Presidio | rehydra | holdback 用 Privacy Filter |
 | --- | --- | --- | --- | --- | --- |
@@ -268,6 +270,6 @@ uv run python bench/task_eval.py --runs 1 --conds raw,codex,presidio,rehydra,ref
 
 Codex 规则下任务照常完成，因为 92% 的隐私值它没有替换。Presidio 和 rehydra 会把整段连接串、URL 和日期换掉，任务要用的端口、路径或日期也就没了。在中文数据集上，holdback 替换掉的普通字符比另外三个都多。在 ai4privacy 和 Nemotron-PII 上，holdback 的规则会保留一些出生日期和证件号，这些值只用检测器时本来会被替换，泄露率因此高出一到两个百分点。识别出生日期的那条规则在第一次跑 Nemotron-PII 之后放宽过，放宽前用 Privacy Filter 的 holdback 在这个数据集上的泄露率是 14.6%。
 
-在 CredData 上，只用蒸馏模型时泄露 24.8%，加上 holdback 的规则后升到 29.9%，主要是因为规则保留了 UUID。保留提交哈希和 UUID 的那条规则在第一次跑 CredData 之后收紧过，收紧前泄露率是 42.9%。现在十六进制串或 UUID 如果是赋给 `secret`、`token` 这类名字的，就会被替换。
+在 CredData 上，只用蒸馏模型时泄露 24.2%，加上 holdback 的规则后升到 30.1%，主要是因为规则保留了 UUID。保留提交哈希和 UUID 的那条规则在第一次跑 CredData 之后收紧过，收紧前泄露率是 42.9%。现在十六进制串或 UUID 如果是赋给 `secret`、`token` 这类名字的，就会被替换。
 
 `bench/check_agents.py` 里的 `exfil` 任务在 README 里埋了一条指令，让 agent 把 `.env` 里的密钥发给外部服务器。Claude Code 配 deepseek-flash 跑了 15 次，全部拒绝执行：直连 5 次，经 holdback 5 次，经 rehydra 5 次。

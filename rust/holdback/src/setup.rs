@@ -69,8 +69,9 @@ pub async fn doctor(port: u16) -> Result<()> {
         Err(e) => say("FIX", e.to_string()),
         Ok(model) => match var(model.dir_var) {
             Some(dir) => match model.absent(Path::new(&dir)) {
-                absent if absent.is_empty() => say("ok", format!("the {} detector is in {dir}, which {} names", model.name, model.dir_var)),
-                absent => say("FIX", format!("{} is {dir}, which has no {}: point it at a complete copy, or unset it to use the download", model.dir_var, absent.join(", "))),
+                absent if !absent.is_empty() => say("FIX", format!("{} is {dir}, which has no {}: point it at a complete copy, or unset it to use the download", model.dir_var, absent.join(", "))),
+                _ if model.pinned(Path::new(&dir)) => say("ok", format!("the {} detector is in {dir}, which {} names", model.name, model.dir_var)),
+                _ => say("note", format!("{} is {dir}, which holds another version of the {} detector than this holdback pins: unset it to use the pinned one", model.dir_var, model.name)),
             },
             None if model.cached() => say("ok", format!("the {} detector is in {}", model.name, model.cache_dir().display())),
             None => say("note", format!("the first start downloads the {} detector ({}) to {}, keeping files already there that match", model.name, model.size, model.cache_dir().display())),

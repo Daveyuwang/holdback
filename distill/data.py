@@ -6,8 +6,8 @@
                not by their names, agent output and secrets as source code writes them; and Chinese documentation
                with the Privacy Filter's spans and planted values -> data/constructed.jsonl
 
-Text taken from real repositories also has the names and emails of the real people in it labeled
-(bench/dev_eval.py's people()), and no row repeats a text that holdback's public benchmark reads.
+The developer text also has the real people that bench/dev_eval.py's people() finds in it labeled, and the rows
+holdback's public benchmark reads are left out.
 
 A row is {"source", "text", "gold": [[start, end, category]]} with character offsets, and "teacher" with the Privacy
 Filter's spans where it labeled the row. The sources: the datasets and repositories in SOURCES at fixed revisions,
@@ -32,16 +32,16 @@ HERE = Path(__file__).parent
 DATA = HERE / "data"
 REPO = HERE.parent
 sys.path.insert(0, str(REPO / "bench"))
-from dev_eval import HELD_OUT_CRATES, people  # noqa: E402
-from public_eval import ATTRIBUTES, SETS, benchmark, entities  # noqa: E402
-from real_eval import CRATES  # noqa: E402
+from dev_eval import CRATES, HELD_OUT_CRATES, people  # noqa: E402
+from public_eval import ATTRIBUTES, entities  # noqa: E402
 from spans import detector_env, run  # noqa: E402
 
 SOURCES = {
-    # (name in the rows, dataset, revision, split, first row, rows). The benchmarks read Nemotron-PII's test split and
-    # four pages of 100 rows of PII Bench ZH, three of which lie past the first row here; public_rows() skips them.
-    "datasets": [("nemotron", "nvidia/Nemotron-PII", "b70ffaf5ff39e079776134c5bf4381f00a9fd1ed", "train", 0, 16000),
-                 ("zh", "asgdaudahu/pii-bench-zh", "69a37af094940c4b999599011814283dee9cf123", "train", 1000, 6000)],
+    # (name in the rows, dataset, revision, split, first row, rows, rows to skip). The benchmark reads Nemotron-PII's
+    # test split and 400 rows of PII Bench ZH in pages of 100 at rows 0, 2,000, 4,000 and 6,000 of this revision.
+    "datasets": [("nemotron", "nvidia/Nemotron-PII", "b70ffaf5ff39e079776134c5bf4381f00a9fd1ed", "train", 0, 16000, []),
+                 ("zh", "asgdaudahu/pii-bench-zh", "69a37af094940c4b999599011814283dee9cf123", "train", 1000, 6000,
+                  [range(2000, 2100), range(4000, 4100), range(6000, 6100)])],
     # git object listings for the lockfile rows
     "repos": {"fd": ("https://github.com/sharkdp/fd", "b80cd53e65615060a62a5ea349a0d78b65d7029e"),
               "ripgrep": ("https://github.com/BurntSushi/ripgrep", "fdf7d95485ec69c599418b7e7154baa4518fed2c"),
@@ -138,21 +138,18 @@ def snippets(rng, per_crate: int, n: int, min_lines: int, most: int) -> list[lis
 
 
 def public_rows():
-    """n rows of each dataset from its first row on, leaving out every text the public benchmark reads."""
+    """n rows of each dataset from its first row on, without the rows the benchmark reads."""
     from datasets import load_dataset
-    held = {text for key in SETS for text, _ in benchmark(key)}
     seen = Counter()
-    for name, dataset, revision, split, first, n in SOURCES["datasets"]:
+    for name, dataset, revision, split, first, n, skip in SOURCES["datasets"]:
         key, labels = ("type", "entities") if name == "zh" else ("label", "spans")
-        kept = 0
-        for r in load_dataset(dataset, split=split, revision=revision, streaming=True).skip(first):
-            if kept == n:
-                break
-            if not r["text"].strip() or r["text"] in held:
+        # read to the end of the slice: a stream left half read can keep its download running past the build
+        rows = load_dataset(dataset, split=split, revision=revision, streaming=True).skip(first).take(n + sum(map(len, skip)))
+        for i, r in enumerate(rows, first):
+            if any(i in s for s in skip) or not r["text"].strip():
                 continue
             spans = entities(r[labels], key)
             seen.update(kind for _, _, kind in spans)
-            kept += 1
             yield {"source": name, "text": r["text"], "gold": [[s, e, cat] for s, e, kind in spans if (cat := category(kind))]}
     print("dataset labels:", dict(seen.most_common()), file=sys.stderr)
 
@@ -816,7 +813,11 @@ def natural():
     values and its real people. Labeling takes most of the time and resumes where it stopped."""
     DATA.mkdir(exist_ok=True)
     rows = list(public_rows())
-    partial = DATA / "natural.partial.jsonl"
+    # named by the rows it labels, so that a run with other rows starts over instead of resuming
+    partial = DATA / f"natural.{hashlib.sha256(json.dumps(rows).encode()).hexdigest()[:12]}.partial.jsonl"
+    for other in DATA.glob("natural.*partial.jsonl"):
+        if other != partial:
+            other.unlink()
     done = sum(1 for _ in open(partial)) if partial.exists() else 0
     with open(partial, "a") as out:
         for i in range(done, len(rows), 400):
@@ -833,8 +834,7 @@ def constructed():
     """data/constructed.jsonl. The Chinese documentation's teacher spans are the Privacy Filter's after holdback's
     rules, without person spans that cannot be names; its gold spans are the planted values."""
     DATA.mkdir(exist_ok=True)
-    real = lambda rows: [with_people(r) for r in rows]  # text taken from real repositories
-    rows = real(contrast_rows(1500)) + list(agent_rows(2000)) + real(secret_rows(1500)) + real(lock_rows())
+    rows = list(contrast_rows(1500)) + list(agent_rows(2000)) + list(secret_rows(1500)) + list(lock_rows())
     docs = list(zh_docs_rows())
     for r, s in zip(docs, run([r["text"] for r in docs], env=TEACHER)):
         r["teacher"] = [x for x in s["refined"] if not not_a_name(r["text"], x)]

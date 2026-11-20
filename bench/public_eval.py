@@ -13,6 +13,8 @@ Leak: a labeled value with no character replaced. False positive: a replaced cha
 Labels for attributes that do not identify a person on their own (dates, occupation, country, organization)
 count as neither. --compare adds the tools in spans.py. --sequence runs each set through one placeholder map in
 order, as one long session would, to measure the pass that replaces a known value wherever it appears.
+The distilled model's training leaves out the 400 rows per set read by default; another --n can read PII Bench ZH
+rows it trained on.
 Usage: uv run python bench/public_eval.py [--n 400] [--compare]"""
 import argparse
 import ast

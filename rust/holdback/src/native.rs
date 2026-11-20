@@ -457,7 +457,8 @@ mod tests {
         let fixture: serde_json::Value = serde_json::from_str(include_str!("testdata/logits.json")).unwrap();
         let windows: Vec<Vec<u32>> = serde_json::from_value(fixture["windows"].clone()).unwrap();
         let want: Vec<Vec<f32>> = serde_json::from_value(fixture["logits"].clone()).unwrap();
-        let model = super::Model::load(&crate::models::PRIVACY_FILTER.cache_dir()).expect("no model; run `HOLDBACK_DETECTOR=privacy-filter holdback serve` once to download it");
+        assert!(crate::models::PRIVACY_FILTER.cached(), "the cache does not hold the pinned model; run `HOLDBACK_DETECTOR=privacy-filter holdback serve` once to download it");
+        let model = super::Model::load(&crate::models::PRIVACY_FILTER.cache_dir()).unwrap();
         let refs: Vec<&[u32]> = windows.iter().map(Vec::as_slice).collect();
         let got = model.logits(&refs, &mut super::Work::default()).unwrap();
         let want: Vec<f32> = want.concat();

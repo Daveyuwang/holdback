@@ -194,23 +194,17 @@ are stored in `~/.config/holdback/lists.json`.
 
 ## Limits
 
-- On the two public sets of personal data that the distilled model never trained on, holdback misses 0.6%
-  (PrivacyBench) and 5.4% (the English rows of ai4privacy) of labeled values. The ai4privacy misses are mostly
-  cities, postcodes, user names and dates of birth. The numbers on
-  [PII Bench ZH](https://huggingface.co/datasets/asgdaudahu/pii-bench-zh) and Nemotron-PII are not held out: 300
-  of the benchmark's 400 PII Bench ZH rows were training rows, and the training used Nemotron-PII's training
-  split.
-- The distilled model leaves the names and emails in a crate's `Cargo.toml` `authors` list in place, because its
-  training text labeled them as not private. In the manifests of the nine crates `bench/real_eval.py` uses, it
-  replaced none of 12 names and 12 emails, and the Privacy Filter replaced 8 names and 11 emails
-  (`bench/dev_eval.py --authors`). In Haiku's hook-mode sessions on those crates, all 24 reached the provider
-  (`bench/real_eval.py`). `HOLDBACK_DETECTOR=privacy-filter` or `holdback replace` covers them.
-- In French, German, Italian, Spanish and Dutch the distilled model misses more than the Privacy Filter: 11 to 18%
+- On the two public sets of personal data that the distilled model never trained on, holdback misses 1.0%
+  (PrivacyBench, all names) and 5.8% (the English rows of ai4privacy, mostly cities, postcodes, dates of birth and
+  building numbers) of labeled values.
+- In French, German, Italian, Spanish and Dutch the distilled model misses more than the Privacy Filter: 9 to 18%
   of labeled values against 5 to 16%, mostly dates of birth, building numbers, postcodes and ID numbers (100 rows
   of ai4privacy per language, `distill/heldout.py`). For such text, set `HOLDBACK_DETECTOR=privacy-filter`. Other
   scripts, such as Korean, Arabic or Hindi, are untested.
-- In Chinese text the distilled model sometimes takes a common word for a name: 2.5% of the other characters in
+- In Chinese text the distilled model sometimes takes a common word for a name: 1.5% of the other characters in
   news text, against 0.6% for the Privacy Filter (`distill/heldout.py`).
+- In an `authors` list the distilled model keeps a lone first name or a one-word handle: 2 of the 14 names in
+  `bench/dev_eval.py --authors`.
 - On [CredData](https://github.com/Samsung/CredData), a set of secrets in source files, holdback misses 30%.
   More than half of those are UUIDs, which holdback keeps because agents use them as identifiers.
 - A long input takes longest the first time it is sent: a 48,000-character file adds about 0.4 seconds on an
@@ -259,7 +253,7 @@ uv run python bench/task_eval.py --runs 1        # task success under five condi
 
 | Detection on generated text | Private values leaked (of 288) | Needed values replaced (of 186) |
 | --- | --- | --- |
-| Distilled model alone | 8.0% | 25.3% |
+| Distilled model alone | 5.2% | 22.6% |
 | Distilled model plus holdback's rules | 0.0% | 3.2% |
 | Same, fresh instances (`--seed 11`) | 0.0% | 3.2% |
 | Privacy Filter plus holdback's rules | 0.3% | 3.2% |
@@ -283,14 +277,19 @@ commands), with made-up names, emails and keys planted at known places.
 
 | Developer output | False replacements per 100 KB | Planted values leaked |
 | --- | --- | --- |
-| Tuning corpus, detector alone | 17 | 0 of 39 |
-| Tuning corpus, with holdback's rules | 4 | 0 of 39 |
+| Tuning corpus, detector alone | 13 | 0 of 39 |
+| Tuning corpus, with holdback's rules | 3 | 0 of 39 |
 | Held-out corpus, detector alone | 31 | 0 of 45 |
 | Held-out corpus, with holdback's rules | 2 | 0 of 45 |
 
 The rules were tuned on the first corpus. The held-out corpus is the source of three crates, an npm lockfile and
 other commands; the distilled model alone takes the npm lockfile's integrity hashes for secrets, and the rules
-keep them. With the Privacy Filter the rules leave 7 and 0 false replacements per 100 KB.
+keep them. With the Privacy Filter the rules leave 3 and 0 false replacements per 100 KB.
+
+On developer text that does name real people, `bench/dev_eval.py --authors` counts what holdback replaces in the
+`authors` lists of the nine crates that `bench/real_eval.py` uses: 12 of the 14 names and all 12 emails, against 8
+names and 11 emails with the Privacy Filter. Both keep a lone first name and a one-word handle. Four of these
+maintainers also appear in the distilled model's training text, from their other crates; it replaces the others too.
 
 `bench/real_eval.py` runs real agent sessions: Claude Code, headless, on copies of nine public crates, five
 tasks each, with hook mode on and with it off. Every task has a check a program can verify, such as writing
@@ -298,14 +297,15 @@ the maintainers from the manifest to a file, or fixing a port in a planted `.env
 password. Requests are recorded on their way to the provider, and the script counts the planted secrets and the
 maintainers' names and emails found in them.
 
-| Real sessions, 45 tasks | Passed, hook mode on | Passed, hook mode off | Planted values sent | Saved values that are wrong |
-| --- | --- | --- | --- | --- |
-| Haiku 5.5 | 45 | 45 | 0 | 1 of 44 |
-| Sonnet 5.5 | 44 | 45 | 0 | 1 of 44 |
-| Opus 5.5 | 45 | 45 | 0 | 1 of 44 |
+| Real sessions, 45 tasks | Passed, hook mode on | Passed, hook mode off | Planted secrets sent | Maintainers' details sent | Saved values that are wrong |
+| --- | --- | --- | --- | --- | --- |
+| Haiku 5.5 | 45 | 45 | 0 | 2 | 1 of 48 |
+| Sonnet 5.5 | 45 | 45 | 0 | 2 | 1 of 48 |
+| Opus 5.5 | 45 | 45 | 0 | 2 | 1 of 48 |
 
-A task took 3 to 7 seconds with hook mode on or off. Sonnet's failed task was a build that could not resolve a
-dependency offline. The wrong value, the same on every model, is a test string in tiktoken-rs taken for a secret.
+A task took 4 to 6 seconds on average with hook mode on or off. The two maintainers' details sent are the lone first
+name and the handle that holdback keeps; with the Privacy Filter, Haiku's sessions sent 7. The wrong value, the
+same on every model, is a model name in tiktoken-rs (`gpt-4o`) taken for a secret.
 These tasks are short, about 1 KB per tool result, and all in Rust crates. The rules were tuned on this harness:
 its first run had 16% wrong values, a database host and a file name among them.
 
@@ -345,11 +345,11 @@ their own, such as dates, occupation, country and organization, are not counted.
 | Codex patterns | 91.7%, 0.0% | 100.0%, 0.0% | 99.9%, 0.0% | 99.8%, 0.0% | 100.0%, 0.0% | 93.1%, 0.2% |
 | Presidio | 38.9%, 60.8% | 66.1%, 10.3% | 32.6%, 9.8% | 19.5%, 1.1% | 8.1%, 4.5% | 83.5%, 11.6% |
 | rehydra | 16.7%, 39.2% | 50.8%, 6.6% | 38.4%, 7.8% | 31.2%, 0.3% | 19.3%, 0.6% | 77.4%, 5.4% |
-| holdback | 0.0%, 3.2% | 0.0%, 18.2% | 5.4%, 11.2% | 1.6%, 0.2% | 0.6%, 0.5% | 29.9%, 8.2% |
+| holdback | 0.0%, 3.2% | 0.0%, 16.9% | 5.8%, 11.3% | 1.6%, 0.2% | 1.0%, 0.5% | 30.1%, 6.6% |
 | holdback with the Privacy Filter | 0.3%, 3.2% | 14.4%, 17.5% | 12.7%, 11.1% | 10.9%, 0.3% | 9.7%, 0.6% | 32.4%, 10.2% |
 
-300 of the 400 PII Bench ZH rows were among the distilled model's training rows, and its training used
-Nemotron-PII's training split, so those two columns are not held out for it.
+The distilled model trained on other rows of PII Bench ZH and on Nemotron-PII's training split, so those two
+columns are not held out for it.
 
 | Task success, one run, 186 tasks | Raw | Codex patterns | Presidio | rehydra | holdback with the Privacy Filter |
 | --- | --- | --- | --- | --- | --- |
@@ -364,7 +364,7 @@ Nemotron-PII, holdback's rules keep some dates of birth and ID numbers that the 
 which raises its leak rate by one to two points. The rule that recognizes a date of birth was widened after the
 first Nemotron-PII run, where holdback with the Privacy Filter leaked 14.6%.
 
-On CredData the distilled model alone leaks 24.8%. holdback's rules raise that to 29.9%, mostly by keeping UUIDs. The
+On CredData the distilled model alone leaks 24.2%. holdback's rules raise that to 30.1%, mostly by keeping UUIDs. The
 rule that keeps commit hashes and UUIDs was narrowed after the first CredData run, where holdback leaked 42.9%:
 a hex string or UUID assigned to a name such as `secret` or `token` is now replaced.
 

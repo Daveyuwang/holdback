@@ -14,7 +14,6 @@ and unjudged otherwise; unjudged values are listed as shapes.
 Needs the `claude` command, logged in, a built holdback binary, and `cargo build` to have fetched the crates.
 Usage: uv run python bench/real_eval.py [--model claude-haiku-5-5] [--jobs 3] [--only-on] [--show]"""
 import argparse
-import glob
 import http.client
 import json
 import os
@@ -31,11 +30,10 @@ from pathlib import Path
 
 from check_agents import DB_PW, ENV, STRIPE
 from check_hooks import free_port
-from dev_eval import people
+from dev_eval import CRATES, maintainers, source
 from spans import BINARY
 
 PLUGIN = Path(__file__).parent.parent / "plugins/claude-code"
-CRATES = ["bytes", "memmap2", "anyhow", "fancy-regex", "gemm", "tiktoken-rs", "bit-set", "itoa", "memchr"]  # small, with an authors field
 SENT: dict[str, list[str]] = {}  # run id -> request bodies
 
 
@@ -89,7 +87,7 @@ def tasks(src: Path) -> tuple[dict, list[str]]:
     }, authors
 
 
-def run(crate: str, src: Path, name: str, prompt: str, check, hooks: bool, a, recorder_port: int) -> dict:
+def run(crate: str, src: Path, name: str, prompt: str, check, hooks: bool, people: list[str], a, recorder_port: int) -> dict:
     run_id = f"{crate}-{name}-{'on' if hooks else 'off'}"
     work = Path(tempfile.mkdtemp(prefix="hb-real-"))
     copy, port = work / "repo", free_port()
@@ -128,8 +126,8 @@ def run(crate: str, src: Path, name: str, prompt: str, check, hooks: bool, a, re
     saved = json.loads((work / "state/values.json").read_text())["values"] if (work / "state/values.json").exists() else {}
     sent = "\n".join(SENT.get(run_id, []))
     shutil.rmtree(work, ignore_errors=True)
-    return {"id": run_id, "crate": crate, "hooks": hooks, "ok": ok, "seconds": seconds, "calls": calls, "size": size, "saved": saved,
-            "leaked": [s for s in (DB_PW, STRIPE) if s in sent], "answer": answer[-300:]}
+    return {"id": run_id, "hooks": hooks, "ok": ok, "seconds": seconds, "calls": calls, "size": size, "saved": saved,
+            "leaked": [s for s in (DB_PW, STRIPE) if s in sent], "exposed": [v for v in people if v in sent], "answer": answer[-300:]}
 
 
 def judge(value: str, authors: list[str]) -> str:
@@ -156,16 +154,17 @@ def main():
     a = ap.parse_args()
     recorder = ThreadingHTTPServer(("127.0.0.1", 0), Recorder)
     threading.Thread(target=recorder.serve_forever, daemon=True).start()
-    jobs, all_authors, maintainers = [], [], {}
+    jobs, all_authors = [], []
     for crate in CRATES:
-        found = sorted(glob.glob(f"{Path.home()}/.cargo/registry/src/*/{crate}-[0-9]*"))
-        if not found:
+        src = source(crate)
+        if not src:
             print(f"skipped {crate}: not in cargo's registry")
             continue
-        todo, authors = tasks(Path(found[-1]))
+        todo, authors = tasks(src)
         all_authors += authors
-        maintainers[crate] = {entry[s:e] for entry in authors for s, e, _ in people(entry)}
-        jobs += [(crate, Path(found[-1]), name, prompt, check, hooks) for name, (prompt, check) in todo.items() for hooks in ((True,) if a.only_on else (True, False))]
+        manifest = (src / "Cargo.toml").read_text()
+        people = [manifest[s:e] for s, e, _ in maintainers(manifest)]
+        jobs += [(crate, src, name, prompt, check, hooks, people) for name, (prompt, check) in todo.items() for hooks in ((True,) if a.only_on else (True, False))]
     with ThreadPoolExecutor(a.jobs) as pool:
         results = list(pool.map(lambda j: run(*j, a, recorder.server_port), jobs))
 
@@ -180,10 +179,10 @@ def main():
         if not r["ok"]:
             print(f"  failed {r['id']}: the agent said: {r['answer'][-200:]!r}")
     on = [r for r in results if r["hooks"]]
-    exposed = sum(v in "\n".join(SENT.get(r["id"], [])) for r in on for v in maintainers[r["crate"]])
     verdicts = Counter()
     listed = []
     for r in on:
+        listed += [f"  sent     {r['id']:24s} {'MAINTAINER':16s} {v if a.show else shape(v)!r}" for v in r["exposed"]]
         for placeholder, value in r["saved"].items():
             verdict = judge(value, all_authors)
             verdicts[verdict] += 1
@@ -191,7 +190,7 @@ def main():
                 listed.append(f"  {verdict:8s} {r['id']:24s} {placeholder.rsplit('_', 1)[0][1:]:16s} {value if a.show else shape(value)!r}")
     total = sum(verdicts.values())
     print(f"with hook mode on: planted values in recorded requests: {sum(len(r['leaked']) for r in on)}; maintainers' names and "
-          f"emails in them: {exposed}, each counted once per run; values saved {total}: "
+          f"emails in them: {sum(len(r['exposed']) for r in on)}, each counted once per run; values saved {total}: "
           f"right {verdicts['right']}, wrong {verdicts['wrong']} ({verdicts['wrong'] / max(1, total):.0%}), unjudged {verdicts['unjudged']}")
     print("\n".join(sorted(listed)))
     print(f"model {a.model}")

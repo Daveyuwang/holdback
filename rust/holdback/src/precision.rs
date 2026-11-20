@@ -402,7 +402,11 @@ mod tests {
 
     /// Both detectors, each downloaded by one start of holdback with HOLDBACK_DETECTOR set to its name.
     fn detectors() -> Vec<crate::detect::Detector> {
-        let open = |m: &crate::models::Model| m.open(&m.dir()).unwrap_or_else(|e| panic!("{e:#}; run `HOLDBACK_DETECTOR={} holdback serve` once to download it", m.name));
+        let open = |m: &crate::models::Model| {
+            let hint = format!("run `HOLDBACK_DETECTOR={} holdback serve` once to download it", m.name);
+            assert!(m.dir() != m.cache_dir() || m.cached(), "the cache does not hold the pinned {} model; {hint}", m.name);
+            m.open(&m.dir()).unwrap_or_else(|e| panic!("{e:#}; {hint}"))
+        };
         vec![open(&crate::models::PRIVACY_FILTER), open(&crate::models::DISTILLED)]
     }
 

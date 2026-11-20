@@ -27,11 +27,11 @@ pub static DISTILLED: Model = Model {
     name: "distilled",
     title: "holdback's distilled privacy model",
     repo: "limbo23/holdback-student",
-    revision: "f1898f041baaea805f78a73d0de55eb3062f7c61",
+    revision: "8f2b162c59dd4835557bbdcb995fd1dd689c4a76",
     files: &[
-        ("config.json", "cbf53393a8839374ce3944ae4ae1c43c0cb481fe24e449a80671ce3fd08c5429"),
-        ("model.safetensors", "ceb665f1b44316521792f73c1a677150f5ac96c3b43c34d0716e912f491a5711"),
-        ("tokenizer.json", "1e33a5df9f2b9ca818afbbce8dc1799b1d289080e30f3b6332a65bb2a2292f89"),
+        ("config.json", "1d8a7249b8e46ae58014ffee07e1d913cb33e3a5faa067aeee2e6330b56f15b2"),
+        ("model.safetensors", "15c2bede412c9a6a19c808803d3d4afd8ba020270400c3a323bf0b30dc6115e3"),
+        ("tokenizer.json", "d429409f3a2f493760bcc1c1398e1c4b32bbf3807b7fde2c6f2decca1a6ee2cc"),
     ],
     dir_var: "HOLDBACK_STUDENT_DIR",
     cache: "holdback-student",
@@ -93,6 +93,11 @@ impl Model {
         std::fs::read_to_string(dir.join(MARKER)).is_ok_and(|r| r == self.revision) && self.absent(&dir).is_empty()
     }
 
+    /// Whether every file in `dir` has its pinned SHA-256.
+    pub fn pinned(&self, dir: &Path) -> bool {
+        self.files.iter().all(|&(f, want)| sha256(&dir.join(f)).is_ok_and(|h| h == want))
+    }
+
     pub fn open(&self, dir: &Path) -> Result<Detector> {
         (self.loader)(dir).with_context(|| format!("could not load {} from {}", self.title, dir.display()))
     }
@@ -101,6 +106,9 @@ impl Model {
     /// from an earlier version is checked once instead of downloaded again.
     async fn download(&self) -> Result<()> {
         let dir = self.cache_dir();
+        // no marker while the files change, so that every version checks an interrupted download again
+        let _ = std::fs::remove_file(dir.join(MARKER));
+        remove_stale_parts(&dir, self.files);
         let host = std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".into());
         let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(30)).read_timeout(Duration::from_secs(60)).build()?;
         let mut announced = false;
@@ -145,6 +153,19 @@ pub async fn load() -> Result<Detector> {
     let mut detector = model.open(&dir)?;
     detector.detect("Warm-up: Alice Example, alice@example.com")?;
     Ok(detector)
+}
+
+/// Removes the part files of downloads that stopped, such as one ended by Ctrl-C. A running download writes at least
+/// once a minute, or its read times out, so a part file idle for ten minutes has no writer.
+fn remove_stale_parts(dir: &Path, files: &[(&str, &str)]) {
+    let mut folders: Vec<PathBuf> = files.iter().filter_map(|(f, _)| dir.join(f).parent().map(Path::to_path_buf)).collect();
+    folders.dedup();
+    for entry in folders.iter().filter_map(|d| std::fs::read_dir(d).ok()).flatten().flatten() {
+        let idle = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|e| e > Duration::from_secs(600)));
+        if idle && entry.file_name().to_string_lossy().ends_with(".part") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Streams `url` into `part` and fails unless the bytes have the SHA-256 `want`.

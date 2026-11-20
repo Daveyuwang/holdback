@@ -13,9 +13,11 @@ The rules were tuned on this corpus. --held-out runs a second one they were not 
 crates from cargo's registry, an npm lockfile, and other commands. It needs `cargo build` to have fetched the
 crates and `npm install` in bench/rehydra for the lockfile; missing parts are skipped.
 
---authors measures the opposite mistake on developer text that does hold private values: how many real people's
-names and emails holdback replaces in the manifests of the crates bench/real_eval.py works on. people() finds them;
-distill/data.py labels the training text with the same function."""
+--authors measures the opposite mistake: how many of the maintainers' names and emails in the authors lists of the
+crates bench/real_eval.py works on holdback replaces.
+
+distill/data.py reads two things from here: people(), which labels real people in its developer text, and the crate
+lists, whose crates it leaves out. A change to either changes the next model's training data."""
 import argparse
 import glob
 import re
@@ -28,7 +30,7 @@ from spans import spans
 
 ROOT = Path(__file__).parent.parent
 SOURCE = ["rust/holdback/src/native.rs", "rust/holdback/src/detect.rs", "rust/holdback/src/server.rs", "rust/holdback/src/protocols.rs",
-          "rust/holdback/src/main.rs", "rust/holdback/src/models.rs", "rust/holdback/src/setup.rs", "rust/holdback/src/hooks.rs", "rust/holdback/src/vault.rs", "install.sh",
+          "rust/holdback/src/main.rs", "rust/holdback/src/setup.rs", "rust/holdback/src/hooks.rs", "rust/holdback/src/vault.rs", "install.sh",
           "plugins/claude-code/hooks/hook.sh", "plugins/claude-code/hooks/session_start.sh", "bench/spans.py", "bench/detect_eval.py"]
 LOCKS = ["rust/holdback/Cargo.lock", "uv.lock", "rust/holdback/Cargo.toml", "pyproject.toml"]
 PINNED = "9e6c174"  # git commands read history up to this commit, so the corpus does not change with every new commit
@@ -36,46 +38,76 @@ COMMANDS = [f"git log --oneline -60 {PINNED}", f"git log --stat -5 --format='%h 
             "ls -la /usr/bin | head -120", "rustc --print target-list | head -120", f"git ls-tree -r --name-only {PINNED} | head -80"]
 PLANTED = [("Maria Gonzalez", "maria.gonzalez@gmail.com", STRIPE), ("Daniel Okafor", "dokafor88@outlook.com", "ghp_R4nd0mEXAMPLEt0k3nR4nd0mEXAMPLEt0k3n"),
            ("Priya Raman", "priya.raman@proton.me", "S3cr3t-Pa55w0rd!")]
+CRATES = ["bytes", "memmap2", "anyhow", "fancy-regex", "gemm", "tiktoken-rs", "bit-set", "itoa", "memchr"]  # bench/real_eval.py's: small, with an authors field
 HELD_OUT_CRATES = ["memmap2", "bytes", "anyhow"]
 HELD_OUT_COMMANDS = ["cargo --list", "df -h", "git branch -a", "ls -la /usr/lib | head -80", "env | cut -d= -f1 | sort | head -80", "uv tree 2>/dev/null | head -120",
                      "ps -axo pid,comm | head -80"]
 CHUNK, LIMIT = 4000, 50_000  # a tool result is rarely larger than a chunk; a lockfile is cut at the limit
 
 
-EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b(?!:)")  # not `git@github.com:owner/repo`
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 SERVICE = re.compile(r"(?i)(no-?reply|do-?not-?reply)@")
-WORDS = r"[^\W\d_][\w'’.-]*(?: ['’]?[^\W\d_][\w'’.-]*){0,3}"  # one to four words, as in `Michal 'vorner' Vaner`
+NOT_A_HOST = re.compile(r"\d+(\.\d+)+\.|\d+x\.")  # `lib@1.2.0.tgz`, `icon@2x.png`
+WORDS = r"[^\W\d_][\w'’.-]*(?: ['’]?[^\W\d_][\w'’.-]*){0,3}"  # one to four words, as in `Jane 'jd' Doe`
 PAIR = re.compile(rf"({WORDS}) <({EMAIL.pattern})>")
-FIELD = re.compile(r"""(?m)^\s*["']?(?:authors?|maintainers?|__author__|__maintainer__)["']?\s*[=:]\s*(\[[^\]]*\]|"[^"\n]*"|'[^'\n]*')""")
-QUOTED = re.compile(r"""["']([^"'\n]+)["']""")
-COPYRIGHT = re.compile(rf"(?i:copyright)(?:\s*(?:\(c\)|©))?(?:\s+\d{{4}}(?:\s*[-–,]\s*\d{{4}})*)?,?\s+(?:by\s+)?({WORDS})")
+FIELD = re.compile(r"""(?mi)^[\s#/*;!-]*(?:@(?:author|maintainer)\b|["']?(?:authors?|maintainers?|__author__|__maintainer__)["']?\s*[=:])"""
+                   r"""[ \t]*(\[[^\]]*\]|"[^"\n]*"|'[^'\n]*'|[^\n]+)""")
+QUOTED = re.compile(r""""([^"\n]+)"|'([^'\n]+)'""")
+COPYRIGHT = re.compile(rf"(?i)copyright\b[\s:=\"']*(?:\(c\)|©)?(?:\s*\d{{4}}(?:\s*[-–,]\s*(?:\d{{4}}|present))*)?,?\s+(?:by\s+)?({WORDS})")
 NOT_PEOPLE = {"the", "authors", "author", "contributors", "developers", "maintainers", "project", "team", "foundation", "inc",
               "llc", "ltd", "limited", "corp", "corporation", "company", "gmbh", "ag", "ab", "as", "oy", "sa", "bv", "nv", "plc",
               "org", "organization", "community", "group", "software", "systems", "labs", "networks", "technologies", "vpn",
               "university", "institute", "association", "others", "admin", "support", "info", "contact", "security", "help",
               "sales", "webmaster", "root", "postmaster", "bot", "owner", "owners", "holder", "holders", "or", "license",
-              "rights", "reserved", "notice"}
+              "rights", "reserved", "notice", "hello", "hi", "dear", "thanks"}
 PARTICLES = {"van", "von", "der", "den", "de", "da", "di", "du", "del", "della", "la", "le", "dos", "das", "bin", "al", "el", "zu", "ter"}
+
+
+def name_word(w: str) -> bool:
+    """A word that can be part of a name: a letter first that is not lowercase (so a CJK name counts), a particle
+    such as `van` or `d'Arc`, or a quoted nickname."""
+    return (w[0].isalpha() and not w[0].islower()) or w.lower() in PARTICLES or w.startswith(("d'", "d’", "'", "’"))
+
+
+def is_email(text: str, m: re.Match) -> bool:
+    """Whether a match of EMAIL is someone's address, not `user:password@host`, `git@host:path`, a file such as
+    `lib@1.2.0.tgz`, code such as `x@self.weight.T` or a no-reply address."""
+    before, host = text[:m.start()], m.group().split("@", 1)[1]
+    if before.endswith((":", "/")) and not before.lower().endswith(("mailto:", "email:")):
+        return False
+    tld = host.rsplit(".", 1)[1]
+    return text[m.end():m.end() + 1] != ":" and not NOT_A_HOST.match(host) and len(tld) >= 2 and tld.isalpha() and not SERVICE.match(m.group())
 
 
 def people(text: str) -> list[list]:
     """Real people's names and emails in developer text, as [start, end, label]: every email but no-reply addresses,
-    the name in `Name <email>`, person names in authors and maintainer fields, and copyright holders. Names of
-    organizations and project teams are left out, and so is a name without an email unless it has two to four
-    capitalized words."""
+    the name in `Name <email>`, person names in author and maintainer fields (quoted, unquoted or in a comment), and
+    copyright holders. Names of organizations and project teams are left out, and so is a name without an email
+    unless it has two to four capitalized words."""
     out = []
 
     def name(start: int, value: str, alone: bool):
         words = value.split(" ")
         if not all(words):  # irregular spacing: not a name
             return
-        if any(w[0].isupper() for w in words):  # `reviewed by Jane Doe <...>`, `author Jane Doe <...>` -> `Jane Doe`
-            while not words[0][0].isupper():
-                start += len(words.pop(0)) + 1
-        if alone:  # keep the capitalized run: `Andrew Gallant and contributors` -> `Andrew Gallant`
-            run = next((i for i, w in enumerate(words) if not (w[0].isupper() or w.lower() in PARTICLES or w.startswith(("d'", "d’")))), len(words))
+        if alone:  # the leading run, to a sentence end: `Jane Doe and contributors`, `Jane Doe. All rights` -> `Jane Doe`
+            run = 0
+            for w in words:
+                if not name_word(w):
+                    break
+                run += 1
+                if run > 1 and w.endswith(".") and len(w) > 2:
+                    break
             words = words[:run]
-        value = " ".join(words).rstrip(".,")
+        elif len(words) > 1:  # the trailing run without lead-ins: `reviewed by Jane Doe`, `Author Jane Doe` -> `Jane Doe`
+            first = len(words)
+            while first and name_word(words[first - 1]):
+                first -= 1
+            while first < len(words) and words[first].lower() in NOT_PEOPLE:
+                first += 1
+            start += sum(len(w) + 1 for w in words[:first])
+            words = words[first:]
+        value = " ".join(words).rstrip(".,")  # a single word before an email stays: a handle such as `jdoe <...>`
         if not value or any(w.lower().strip(".,") in NOT_PEOPLE for w in words):
             return
         if alone and not (2 <= len(words) <= 4 and value[0].isupper() and not value.isupper()):  # all capitals: license text
@@ -87,35 +119,56 @@ def people(text: str) -> list[list]:
         if not SERVICE.match(m.group(2)):
             name(m.start(1), m.group(1), alone=False)
     for m in FIELD.finditer(text):
-        for q in QUOTED.finditer(m.group(1)):
-            if "@" not in q.group(1):
-                name(m.start(1) + q.start(1), q.group(1), alone=True)
+        value, at = m.group(1), m.start(1)
+        items = [(at + q.start(q.lastindex), q.group(q.lastindex)) for q in QUOTED.finditer(value)] if value[0] in "[\"'" else [(at, value)]
+        for start, item in items:
+            for part in re.finditer(r"[^,;&]+", item):  # `Jane Doe, John Roe`
+                piece = part.group()
+                if piece.strip():
+                    name(start + part.start() + len(piece) - len(piece.lstrip()), piece.strip(), alone=True)
     for m in COPYRIGHT.finditer(text):
         name(m.start(1), m.group(1), alone=True)
     for m in EMAIL.finditer(text):
-        if text[max(0, m.start() - 1):m.start()] not in (":", "/") and not SERVICE.match(m.group()):
+        if is_email(text, m):
             out.append([m.start(), m.end(), "private_email"])
     return sorted(out)
 
 
-def manifests() -> list[str]:
-    """The Cargo.toml of each crate bench/real_eval.py works on, from cargo's registry, the version it picks."""
-    from real_eval import CRATES
-    found = [sorted(glob.glob(f"{Path.home()}/.cargo/registry/src/*/{crate}-[0-9]*")) for crate in CRATES]
-    return [(Path(f[-1]) / "Cargo.toml").read_text() for f in found if f]
+def source(crate: str) -> Path | None:
+    """The newest version of a crate in cargo's registry."""
+    found = glob.glob(f"{Path.home()}/.cargo/registry/src/*/{crate}-[0-9]*")
+    version = lambda p: [(0, int(x)) if x.isdigit() else (1, x) for x in re.split(r"[.+-]", Path(p).name[len(crate) + 1:])]
+    return Path(max(found, key=version)) if found else None
+
+
+def maintainers(manifest: str) -> list[list]:
+    """The people in a Cargo.toml's authors list, as [start, end, label]: each entry's name and email, without team
+    entries such as `The Contributors` and no-reply addresses. Unlike people(), it takes every such entry, a lone
+    first name or handle included."""
+    field = re.search(r"authors\s*=\s*\[(.*?)\]", manifest, re.S)
+    out = []
+    for entry in re.finditer(r'"([^"]+)"', field.group(1) if field else ""):
+        base = field.start(1) + entry.start(1)
+        m = re.fullmatch(r"\s*(.*?)\s*(?:<\s*(.*?)\s*>)?\s*", entry.group(1))
+        if m.group(1) and not any(w.lower() in NOT_PEOPLE for w in m.group(1).split()):
+            out.append([base + m.start(1), base + m.end(1), "private_person"])
+        if m.group(2) and not SERVICE.match(m.group(2)):
+            out.append([base + m.start(2), base + m.end(2), "private_email"])
+    return out
 
 
 def authors():
-    texts = manifests()
+    """--authors: the maintainers' names and emails replaced in full in the manifests of bench/real_eval.py's crates."""
+    texts = [(s / "Cargo.toml").read_text() for s in map(source, CRATES) if s]
     per = spans(texts, "authors_spans")
     for title, key in (("detector only", "detected"), ("detector + rules", "refined")):
         found, total = Counter(), Counter()
         for text, row in zip(texts, per):
-            for s, e, label in people(text):
+            for s, e, label in maintainers(text):
                 total[label] += 1
-                found[label] += any(s < e2 and s2 < e for s2, e2, _ in row[key])
-        print(f"{title:18s} real names replaced {found['private_person']}/{total['private_person']}   "
-              f"real emails replaced {found['private_email']}/{total['private_email']}   in the manifests of {len(texts)} crates")
+                found[label] += all(any(s2 <= i < e2 for s2, e2, _ in row[key]) for i in range(s, e))
+        print(f"{title:18s} names replaced {found['private_person']}/{total['private_person']}   "
+              f"emails replaced {found['private_email']}/{total['private_email']}   in the authors lists of {len(texts)} crates")
 
 
 def corpus(held_out: bool = False) -> list[tuple[str, str, list[str]]]:

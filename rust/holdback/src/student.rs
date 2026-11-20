@@ -38,6 +38,10 @@ impl Student {
     pub fn load(dir: &Path) -> Result<Self> {
         let tok = tokenizers::Tokenizer::from_file(dir.join("tokenizer.json")).map_err(|e| anyhow!("{e}"))?;
         let model = Bert::load(dir)?;
+        let (pieces, rows) = (tok.get_vocab_size(true), model.f32s("bert.embeddings.word_embeddings.weight")?.len() / model.hidden);
+        if pieces != rows {
+            bail!("tokenizer.json has {pieces} pieces but model.safetensors has {rows} embeddings: the files come from different versions");
+        }
         let cfg: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("config.json"))?)?;
         let names = (0..model.classes).map(|i| cfg["id2label"][i.to_string()].as_str().map(String::from)).collect::<Option<Vec<_>>>();
         let names = names.context("config.json has no label names (id2label)")?;
@@ -344,7 +348,8 @@ mod tests {
         let fixture: serde_json::Value = serde_json::from_str(include_str!("testdata/student_logits.json")).unwrap();
         let windows: Vec<Vec<u32>> = serde_json::from_value(fixture["windows"].clone()).unwrap();
         let want: Vec<f32> = serde_json::from_value(fixture["logits"].clone()).unwrap();
-        let student = super::Student::load(&crate::models::DISTILLED.cache_dir()).expect("no model; run `holdback serve` once to download it");
+        assert!(crate::models::DISTILLED.cached(), "the cache does not hold the pinned model; run `holdback serve` once to download it");
+        let student = super::Student::load(&crate::models::DISTILLED.cache_dir()).unwrap();
         let refs: Vec<&[u32]> = windows.iter().map(Vec::as_slice).collect();
         let got = student.model.logits(&refs, student.cls, student.sep, &mut super::Work::default()).unwrap();
         assert_eq!(got.len(), want.len());
