@@ -57,6 +57,8 @@ cargo install --git https://github.com/Daveyuwang/holdback holdback
 
 第一次启动会把 [OpenAI Privacy Filter](https://github.com/openai/privacy-filter) 的 4 位量化 ONNX 模型下载到 `~/.cache/holdback`，约 0.9 GB，Apache-2.0 协议。holdback 用自己的代码运行模型，不依赖 ONNX Runtime。权重文件直接映射进内存，不再复制一份。模型有 128 个专家模块，每个 token 只读它用到的 4 个。代理启动约 0.1 秒，空闲时占用约 50 MB 内存，工作时约 100 MB，一般的请求多花约 35 毫秒。映射进来的模型文件算作文件缓存，系统需要时可以收回。macOS 上的矩阵运算交给苹果的 Accelerate 库，其他系统用一个可移植的 Rust 库，在同一台 Mac 上测，长文本要慢 2.4 倍。npm 和 Homebrew 的预编译包还在计划中。
 
+还有一个实验性的蒸馏检测器，可以代替 Privacy Filter。它更小、更快，找出的中文人名更多，但还不是默认选项。从 [Hugging Face](https://huggingface.co/limbo23/holdback-student) 下载后，把 `HOLDBACK_STUDENT_DIR` 设成它所在的文件夹。下载命令和测量结果见模型卡。
+
 ## Claude Code
 
 `holdback setup claude` 会替你完成这一节的步骤。想手动做的话，先同时启动代理和 Claude Code：

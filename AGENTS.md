@@ -94,7 +94,7 @@ the public sets are the held-out check: report both.
 | `HOLDBACK_UPSTREAMS` | Extra upstreams, `name=https://host/base,other=...` |
 | `HOLDBACK_KEY_ENV` | Variable that holds the upstream key for `run codex`, default `OPENAI_API_KEY` |
 | `HOLDBACK_MODEL_DIR` | Model directory instead of the cache |
-| `HOLDBACK_STUDENT_DIR` | Use the distilled student instead of the Privacy Filter: a directory with `config.json`, `model.safetensors` (f32) and `tokenizer.json`. Experimental; the model is not published yet |
+| `HOLDBACK_STUDENT_DIR` | Use the distilled student instead of the Privacy Filter: a directory with `config.json`, `model.safetensors` (f32) and `tokenizer.json`. Experimental; the model is [limbo23/holdback-student](https://huggingface.co/limbo23/holdback-student) on Hugging Face, its training code is not in this repository yet |
 | `HOLDBACK_DUMP` | Append each redacted upstream request to this file, for the checks |
 | `HOLDBACK_HOOKS` | `1` switches hook mode on for sessions that are not routed through the proxy |
 | `HOLDBACK_STATE_DIR` | Where hook mode saves its placeholder map, default `~/.local/state/holdback` |

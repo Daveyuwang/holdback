@@ -79,6 +79,11 @@ which the system can reclaim. On macOS the matrix math runs on Apple's Accelerat
 library does it, which on the same Mac was 2.4 times slower on long inputs. Homebrew and npm packages are
 planned.
 
+An experimental distilled detector can replace the Privacy Filter. It is smaller and faster and finds more
+Chinese names, but it is not the default yet. Download it from
+[Hugging Face](https://huggingface.co/limbo23/holdback-student) and point `HOLDBACK_STUDENT_DIR` at its folder;
+the model card has the commands and the measurements.
+
 ## Claude Code
 
 `holdback setup claude` does the steps in this section for you. To do them by hand, start the proxy and
