@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- `holdback replace` now replaces a listed phrase in full even when the detector recognizes only part of it.
+  The reply restores the original phrase.
+- Restarting holdback preserves the placeholders for values on the replace list, so older turns in a resumed
+  hook session still restore correctly.
+
 ## 0.2.1
 
 - Numbers that stand alone, such as counts and process ids, are kept, and so are shell syntax, command-line

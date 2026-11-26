@@ -176,8 +176,8 @@ keep that output away from models and logs. `holdback review --masked` prints on
 (`Aaaaa Aaaaaaa`, `aaaa@aaaaa.aaa`), which is safe to share.
 
 To correct holdback, `holdback keep VALUE` stops a value from being replaced, and `holdback replace VALUE`
-makes holdback replace a value the detector misses, such as a name. Both take effect on the next request and
-are stored in `~/.config/holdback/lists.json`.
+makes holdback replace the whole value, even if the detector recognizes only part of a name or phrase. Both
+take effect on the next request and are stored in `~/.config/holdback/lists.json`.
 
 To tell us about a wrong replacement or a missed value, [open an issue](https://github.com/Daveyuwang/holdback/issues/new/choose)
 with `holdback review --masked` output or, in hook mode, the matching lines of `~/.local/state/holdback/sightings.log`,

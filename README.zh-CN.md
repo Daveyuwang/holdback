@@ -130,8 +130,8 @@ HOLDBACK_KEY_ENV=BAILIAN_API_KEY holdback run codex --upstream bailian -m qwen3.
 它在终端里打印的是真实值，不要把输出贴给模型或写进日志。`holdback review --masked` 只打印每个值的形状
 （`Aaaaa Aaaaaaa`、`aaaa@aaaaa.aaa`），可以放心分享。
 
-想纠正 holdback，用 `holdback keep VALUE` 让某个值不再被替换，用 `holdback replace VALUE` 让它替换检测模型漏掉的值，
-比如一个人名。两者都在下一个请求生效，记录在 `~/.config/holdback/lists.json`。
+想纠正 holdback，用 `holdback keep VALUE` 保留某个值，用 `holdback replace VALUE` 替换整个值，
+即使模型只认出了人名或短语的一部分。两者都在下一个请求生效，记录在 `~/.config/holdback/lists.json`。
 
 遇到误替换或漏掉的值，欢迎[提 issue](https://github.com/Daveyuwang/holdback/issues/new/choose)，附上 `holdback review --masked` 的输出；
 钩子模式下附上 `~/.local/state/holdback/sightings.log` 里对应的几行，里面同样只有形状。如果是 holdback 检测到了却仍然发出去的值，

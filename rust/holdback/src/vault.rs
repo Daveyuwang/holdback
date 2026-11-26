@@ -5,11 +5,11 @@
 //! detector missed in one context is still replaced once it has been seen elsewhere.
 use crate::detect::{Detector, Span};
 use crate::precision::refine;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use fancy_regex::Regex;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use std::sync::LazyLock;
 
@@ -180,10 +180,15 @@ impl Vault {
         Ok(())
     }
 
-    /// Take the user's corrections from `path`, now and whenever the file changes (see `refresh`).
-    pub fn correct_from(&mut self, path: PathBuf) {
-        self.lists.path = path;
-        self.refresh();
+    /// Restore hook placeholders before assigning numbers to values on the replace list.
+    pub fn open(detector: Detector, lists: PathBuf, store: &Path) -> Result<Self> {
+        let mut vault = Self::new(detector);
+        if store.try_exists()? {
+            vault.keep_in(store.to_owned()).with_context(|| format!("could not read {}", store.display()))?;
+        }
+        vault.lists.path = lists;
+        vault.refresh();
+        Ok(vault)
     }
 
     /// Reread the corrections if their file changed. Called once per request, so a correction made while the
@@ -220,15 +225,51 @@ impl Vault {
         value.chars().count() >= 4 && confirmed
     }
 
-    /// The parts of `text` to replace, in order, each with its placeholder: what the detector and the rules
-    /// found, then values known from elsewhere that the detector missed here. Placeholders already in the text
-    /// are left alone.
+    /// Where the values the user always replaces occur in `text`, each widened over the detector's spans it
+    /// touches: the detector may find only a piece of such a value, and no part of it may stay. An occurrence
+    /// inside one span is left to the detector, which replaces all of it.
+    fn listed(&self, text: &str, spans: &[Span]) -> Vec<(usize, usize)> {
+        let mut ranges: Vec<(usize, usize)> = vec![];
+        for value in &self.lists.replace {
+            for at in whole_matches(text, value) {
+                let end = at + value.len();
+                let touching = || spans.iter().filter(|sp| sp.start < end && at < sp.end);
+                if !touching().any(|sp| sp.start <= at && end <= sp.end) {
+                    ranges.push((touching().map(|sp| sp.start).fold(at, usize::min), touching().map(|sp| sp.end).fold(end, usize::max)));
+                }
+            }
+        }
+        ranges.sort();
+        let mut out: Vec<(usize, usize)> = vec![];
+        for (start, end) in ranges {
+            match out.last_mut() {
+                Some(last) if start < last.1 => last.1 = last.1.max(end),
+                _ => out.push((start, end)),
+            }
+        }
+        out
+    }
+
+    /// The parts of `text` to replace, in order, each with its placeholder: the values the user always replaces,
+    /// what the detector and the rules found, then values known from elsewhere that the detector missed here.
+    /// Placeholders already in the text are left alone.
     pub fn replacements(&mut self, text: &str) -> Result<Vec<(usize, usize, String)>> {
         let (spans, new_text) = self.spans(text)?;
+        let listed = self.listed(text, &spans);
         let mut out: Vec<(usize, usize, String)> = vec![];
+        for &(start, end) in &listed {
+            let value = &text[start..end];
+            out.push((start, end, self.placeholder(value, "private_value")));
+            if let Some(seen) = self.seen.get_mut(value) {
+                seen.matched += 1;
+            }
+        }
         for sp in spans {
             let value = &text[sp.start..sp.end];
-            if WHOLE_PLACEHOLDER.is_match(value.trim()).unwrap_or(false) || self.lists.keep.contains(value) {
+            if WHOLE_PLACEHOLDER.is_match(value.trim()).unwrap_or(false)
+                || self.lists.keep.contains(value)
+                || listed.iter().any(|&(s, e)| s <= sp.start && sp.end <= e)
+            {
                 continue;
             }
             if !self.to_ph.contains_key(value) {
@@ -356,8 +397,37 @@ impl StreamRestorer {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamRestorer, Vault};
+    use super::{PLACEHOLDER, StreamRestorer, Vault};
     use crate::models::DISTILLED;
+
+    /// The detector finds a piece of a value on the replace list, or a span that reaches past it. Nothing of
+    /// the listed value stays, and the text comes back whole.
+    #[test]
+    fn replaces_a_listed_value_whole() {
+        let lists = std::env::temp_dir().join(format!("holdback-lists-{}.json", std::process::id()));
+        let store = lists.with_extension("values.json");
+        std::fs::write(&lists, r#"{"replace": ["Project Nightjar", "Whitfield from accounting", "Whitfield"]}"#).unwrap();
+        let old = format!("[PRIVATE_VALUE_{}]", 1200);
+        let saved = serde_json::json!({"counter": 1200, "values": { (old.clone()): "Project Nightjar" }});
+        std::fs::write(&store, saved.to_string()).unwrap();
+        let mut vault = Vault::open(DISTILLED.open(&DISTILLED.dir()).unwrap(), lists.clone(), &store).unwrap();
+        std::fs::remove_file(store).unwrap();
+        std::fs::remove_file(lists).unwrap();
+        assert_eq!(vault.restore(&old, false), "Project Nightjar");
+        assert_eq!(vault.redact("Deploy Project Nightjar tonight.").unwrap(), format!("Deploy {old} tonight."));
+        let cases = [
+            ("Deploy Project Nightjar tonight.", "Deploy  tonight."), // the detector finds "Nightjar"
+            ("Ask Dana Whitfield from accounting.", "Ask ."),         // and here "Dana Whitfield"
+            ("Reviewed by Dana Whitfield.", "Reviewed by ."),
+        ];
+        for (text, rest) in cases {
+            let redacted = vault.redact(text).unwrap();
+            assert_eq!(PLACEHOLDER.replace_all(&redacted, ""), rest, "{redacted}");
+            assert_eq!(vault.restore(&redacted, false), text);
+        }
+        // a listed value inside what the detector found keeps the detector's placeholder
+        assert!(vault.redact("Reviewed by Dana Whitfield.").unwrap().starts_with("Reviewed by [PRIVATE_PERSON_"));
+    }
 
     /// Some models write a placeholder without its brackets, and a stream may cut one anywhere.
     #[test]

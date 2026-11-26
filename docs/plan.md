@@ -40,7 +40,7 @@ features; each step ends with a check that a reader can rerun or see.
 | The owner column of `ls -l`: the distilled model replaces a login name there in some listings and keeps it in others | Replaced in every line unless it is a system account; cases in `precision.rs`; benchmarks no worse |
 | 0.2.1 with the fixes since 0.2.0 | Released; the install script installs it on clean machines; real sessions pass on Haiku, Sonnet and Opus |
 | An issue form for a wrong replacement and for a missed value | A report needs the version, the mode and masked output, nothing private |
-| Real use: hook mode in the maintainer's daily work, on 0.2.1, for at least three working days and 200 new values, read from the shapes in `sightings.log` | At most 10% of the saved values wrong; the counts in the README. Above 10%, the largest kinds get rules and a 0.2.2 |
+| Real use: hook mode in the maintainer's daily work, on 0.2.1, for at least three working days and 200 new values, read from the shapes in `sightings.log` | At most 10% of the saved values wrong; the counts in the README. Above 10%, fix the most frequent errors in a patch release |
 | An announcement in two or more communities | Posted; each report answered within two days; what came in recorded here two weeks later |
 
 Done: the `ls -l` rule, 0.2.1 (released 2026-11-20, with a rule for pieces of long numbers that the real sessions

@@ -78,12 +78,8 @@ fn correct(list: &str, values: &[String]) -> Result<()> {
 
 async fn serve(port: u16) -> Result<()> {
     let t0 = Instant::now();
-    let mut vault = vault::Vault::new(models::load().await?);
-    vault.correct_from(lists_file());
     let store = store_file();
-    if store.exists() {
-        vault.keep_in(store.clone()).with_context(|| format!("could not read {}", store.display()))?;
-    }
+    let vault = vault::Vault::open(models::load().await?, lists_file(), &store)?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.with_context(|| format!("port {port} is in use"))?;
     eprintln!("Ready on http://127.0.0.1:{port} in {:.1}s (status page: http://127.0.0.1:{port}/_holdback)", t0.elapsed().as_secs_f32());
     axum::serve(listener, server::app(vault, store)).await?;
