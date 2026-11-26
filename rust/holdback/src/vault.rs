@@ -21,9 +21,10 @@ static TAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[[A-Z0-9_]{0,48}$|
 const CACHE_LIMIT: usize = 4096;
 
 /// What `holdback review` shows for one replaced value.
+#[derive(Default)]
 struct Seen {
     detected: usize, // times the detector or a rule found it
-    matched: usize,  // times it was replaced as an already known value
+    total: usize,    // all replacements, including list and known-value matches
     texts: usize,    // distinct texts in which the detector or a rule found it
     context: String, // the text around its first sighting
 }
@@ -90,8 +91,8 @@ impl Vault {
     /// These are the real values: only `holdback review` may show them.
     pub fn review(&self) -> Vec<Value> {
         let mut rows: Vec<_> = self.seen.iter().collect();
-        rows.sort_by_key(|(v, s)| (std::cmp::Reverse(s.detected + s.matched), *v));
-        rows.iter().map(|(v, s)| json!({"value": v, "placeholder": self.to_ph[*v], "detected": s.detected, "matched": s.matched, "context": s.context})).collect()
+        rows.sort_by_key(|(v, s)| (std::cmp::Reverse(s.total), *v));
+        rows.iter().map(|(v, s)| json!({"value": v, "placeholder": self.to_ph[*v], "detected": s.detected, "matched": s.total - s.detected, "context": s.context})).collect()
     }
 
     /// The refined spans of `text`, and whether this text is new to the cache.
@@ -137,7 +138,7 @@ impl Vault {
                 if let Some(value) = value.as_str().filter(|v| !self.to_ph.contains_key(*v)) {
                     self.learn(value, ph);
                     // a rule added since the value was saved may say it was never private
-                    let label = ph[1..ph.rfind('_').unwrap_or(1)].to_lowercase();
+                    let label = placeholder_label(ph);
                     if refine(value, &[Span { start: 0, end: value.len(), label }]).is_empty() {
                         self.retired.insert(value.to_string());
                     }
@@ -260,9 +261,6 @@ impl Vault {
         for &(start, end) in &listed {
             let value = &text[start..end];
             out.push((start, end, self.placeholder(value, "private_value")));
-            if let Some(seen) = self.seen.get_mut(value) {
-                seen.matched += 1;
-            }
         }
         for sp in spans {
             let value = &text[sp.start..sp.end];
@@ -276,8 +274,7 @@ impl Vault {
                 self.log_sighting(&sp.label, value, &context(text, sp.start, sp.end));
             }
             let ph = self.placeholder(value, &sp.label);
-            *self.stats.entry(sp.label.clone()).or_default() += 1;
-            let seen = self.seen.entry(value.to_string()).or_insert_with(|| Seen { detected: 0, matched: 0, texts: 0, context: context(text, sp.start, sp.end) });
+            let seen = self.seen.entry(value.to_string()).or_default();
             seen.detected += 1;
             seen.texts += new_text as usize;
             out.push((sp.start, sp.end, ph));
@@ -290,13 +287,18 @@ impl Vault {
                 let end = at + value.len();
                 if out.iter().all(|&(s, e, _)| e <= at || end <= s) {
                     out.push((at, end, self.to_ph[value].clone()));
-                    if let Some(seen) = self.seen.get_mut(value) {
-                        seen.matched += 1;
-                    }
                 }
             }
         }
         out.sort();
+        for (start, end, ph) in &out {
+            let seen = self.seen.entry(text[*start..*end].to_owned()).or_default();
+            if seen.total == 0 {
+                seen.context = context(text, *start, *end);
+            }
+            seen.total += 1;
+            *self.stats.entry(placeholder_label(ph)).or_default() += 1;
+        }
         Ok(out)
     }
 
@@ -351,6 +353,11 @@ pub fn shape(text: &str) -> String {
         _ => c,
     };
     text.chars().map(one).collect()
+}
+
+/// The type on the placeholder used for a replacement.
+pub fn placeholder_label(ph: &str) -> String {
+    ph.strip_prefix('[').and_then(|p| p.rsplit_once('_')).map_or("private_value", |(label, _)| label).to_lowercase()
 }
 
 /// The text around a span, on one line, with the value between « and ».
@@ -427,6 +434,31 @@ mod tests {
         }
         // a listed value inside what the detector found keeps the detector's placeholder
         assert!(vault.redact("Reviewed by Dana Whitfield.").unwrap().starts_with("Reviewed by [PRIVATE_PERSON_"));
+    }
+
+    #[test]
+    fn counts_each_applied_replacement_in_status_and_review() {
+        let mut vault = Vault::new(DISTILLED.open(&DISTILLED.dir()).unwrap());
+        vault.lists.replace.insert("Project Nightjar".into());
+        vault.placeholder("cargo", "private_value"); // already in the map when this session starts
+        vault.placeholder("unused-canary-item", "private_value");
+        assert!(vault.review().is_empty());
+
+        let text = "Deploy Project Nightjar with cargo. Email dev@example.com.";
+        for _ in 0..2 {
+            let redacted = vault.redact(text).unwrap();
+            assert_eq!(vault.restore(&redacted, false), text);
+        }
+        assert_eq!(vault.stats["private_value"], 4);
+        assert_eq!(vault.stats["private_email"], 2);
+        let rows = vault.review();
+        assert_eq!(rows.len(), 3);
+        for (value, detected, matched) in [("Project Nightjar", 0, 2), ("cargo", 0, 2), ("dev@example.com", 2, 0)] {
+            let row = rows.iter().find(|r| r["value"] == value).unwrap();
+            assert_eq!(row["detected"], detected);
+            assert_eq!(row["matched"], matched);
+            assert!(row["context"].as_str().unwrap().contains(&format!("«{value}»")));
+        }
     }
 
     /// Some models write a placeholder without its brackets, and a stream may cut one anywhere.

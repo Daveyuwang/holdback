@@ -222,8 +222,7 @@ async fn spans(path: &str) -> Result<()> {
             for (t, row) in v["texts"].as_array().unwrap().iter().zip(out.iter_mut()) {
                 let text = t.as_str().context("text")?;
                 let chars = |b: usize| text[..b].chars().count();
-                let label = |ph: &str| ph[1..ph.rfind('_').unwrap()].to_lowercase();
-                row[key] = vault.replacements(text)?.iter().map(|(s, e, ph)| json!([chars(*s), chars(*e), label(ph)])).collect();
+                row[key] = vault.replacements(text)?.iter().map(|(s, e, ph)| json!([chars(*s), chars(*e), vault::placeholder_label(ph)])).collect();
             }
         }
         println!("{}", serde_json::to_string(&out)?);
