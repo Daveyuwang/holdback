@@ -22,15 +22,25 @@ holdback 让编程 agent 发给云端模型的内容里不带个人信息和密�
 curl -fsSL https://raw.githubusercontent.com/Daveyuwang/holdback/main/install.sh | sh
 ```
 
+这条命令把 `holdback` 装到 `~/.local/bin`，支持 macOS（Apple 芯片或 Intel）和 Linux（x86-64 或 ARM64）。
+配置代理前，可以先在本机试一次检测。首次运行会下载约 115 MB 的模型，试用无需 API 密钥。
+
 ```bash
-holdback setup claude
+printf '%s\n' '{"texts":["Email dev@example.com about port 5432."]}' | ~/.local/bin/holdback spans /dev/stdin
 ```
 
-第一条命令把一个 15 MB 的可执行文件装到 `~/.local/bin`，支持 Apple 芯片和 Intel 的 macOS，以及 x86-64 和 ARM 的 Linux。
-第二条命令安装 Claude Code 插件，并以[钩子模式](#钩子模式给桌面应用用)为所有 Claude Code 会话打开 holdback。加上
+输出里 `refined` 的 `[6,21,"private_email"]` 对应 `dev@example.com` 的字符范围。端口 `5432` 会保留。
+试用中遇到误遮或漏遮，可以用虚构输入复现，附上它的 `refined` 数组。[提交反馈](https://github.com/Daveyuwang/holdback/issues/new/choose)
+
+要在 Claude Code 中启用 holdback，运行以下命令。
+
+```bash
+~/.local/bin/holdback setup claude
+```
+
+这条命令安装 Claude Code 插件，并以[钩子模式](#钩子模式给桌面应用用)为所有 Claude Code 会话打开 holdback。加上
 `--proxy`，从终端启动的会话还会走代理，覆盖的范围更大。它会先备份你的设置文件，并告诉你怎么撤销。
 
-两条命令加起来大约一秒。之后第一次启动会话时会下载模型，约 115 MB。
 `holdback doctor` 检查安装情况，哪里有问题就给出修法。`sh install.sh --uninstall` 删除可执行文件。
 
 也可以从源码安装，需要 Rust 1.88 或更高版本：

@@ -36,17 +36,29 @@ reached 100% on all three. [Benchmark](#benchmark) has the full tables and the c
 curl -fsSL https://raw.githubusercontent.com/Daveyuwang/holdback/main/install.sh | sh
 ```
 
+This installs `holdback` to `~/.local/bin` on macOS (Apple silicon or Intel) and Linux (x86-64 or ARM64).
+Try the detector before configuring an agent. The first run downloads the 115 MB model. The sample runs locally
+and needs no API key.
+
 ```bash
-holdback setup claude
+printf '%s\n' '{"texts":["Email dev@example.com about port 5432."]}' | ~/.local/bin/holdback spans /dev/stdin
 ```
 
-The first command installs one 15 MB binary to `~/.local/bin`, for macOS on Apple silicon or Intel and for
-Linux on x86-64 or ARM. The second installs the Claude Code plugin and switches holdback on for every Claude
-Code session, in [hook mode](#hook-mode-for-the-desktop-app). With `--proxy` it also sends sessions started
+The `refined` result contains `[6,21,"private_email"]`, the character range covering `dev@example.com`.
+The port stays in the text. To report a result, use a made-up input and include its `refined` array.
+[Report a wrong replacement or a missed value](https://github.com/Daveyuwang/holdback/issues/new/choose)
+
+To enable holdback for Claude Code, run the setup command.
+
+```bash
+~/.local/bin/holdback setup claude
+```
+
+This installs the Claude Code plugin and switches holdback on for every Claude Code session, in
+[hook mode](#hook-mode-for-the-desktop-app). With `--proxy` it also sends sessions started
 from a terminal through the proxy, which covers more. It saves a copy of your settings file first and prints
 how to undo the change.
 
-Both commands finish in about a second. The first session then downloads the model, about 115 MB.
 `holdback doctor` checks the installation and names the fix for anything that is wrong.
 `sh install.sh --uninstall` removes the binary.
 

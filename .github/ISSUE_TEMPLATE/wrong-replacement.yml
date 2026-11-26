@@ -19,6 +19,7 @@ body:
       options:
         - Proxy (holdback run or holdback serve)
         - Hook mode
+        - Local detector trial (holdback spans)
     validations:
       required: true
   - type: input
@@ -29,11 +30,11 @@ body:
   - type: textarea
     id: masked
     attributes:
-      label: Masked output
+      label: Output showing the replacement
       description: >-
-        Proxy: the lines of `holdback review --masked`. Hook mode: the lines of
-        `~/.local/state/holdback/sightings.log`. Both hold the shape of each value and of the text around it,
-        not the values.
+        For a local trial, paste the `refined` array from your made-up example. For the proxy, paste the
+        relevant lines of `holdback review --masked`. For hook mode, you can also use the matching lines of
+        `~/.local/state/holdback/sightings.log`.
       render: text
     validations:
       required: true
@@ -41,7 +42,7 @@ body:
     id: example
     attributes:
       label: What should have stayed
-      description: A made-up text of the same shape, which part holdback replaced, and what the agent needed it for.
+      description: Give a made-up example, the part that should stay visible, and why it matters.
     validations:
       required: true
   - type: checkboxes

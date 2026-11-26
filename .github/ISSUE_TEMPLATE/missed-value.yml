@@ -21,6 +21,7 @@ body:
       options:
         - Proxy (holdback run or holdback serve)
         - Hook mode
+        - Local detector trial (holdback spans)
     validations:
       required: true
   - type: dropdown
@@ -36,7 +37,8 @@ body:
       label: Example
       description: >-
         A made-up text of the same shape that holdback leaves in place, and which part should be replaced. Say where
-        the text came from, such as a file the agent read or the output of a command.
+        the text came from, such as a file the agent read or the output of a command. For a local trial,
+        include the `refined` array from your made-up example, even if it is empty (`[]`).
       render: text
     validations:
       required: true
