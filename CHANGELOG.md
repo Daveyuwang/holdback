@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
 - `holdback status` and `holdback review` now count replacements made from the user's replace list or a value
   the process already knows. A listed value first appears in review when it is used.
